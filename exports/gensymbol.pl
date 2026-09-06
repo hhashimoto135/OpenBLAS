@@ -99,7 +99,8 @@
     cblas_dsyr2k, cblas_dsyr, cblas_dsyrk, cblas_dtbmv, cblas_dtbsv, cblas_dtpmv, cblas_dtpsv,
     cblas_dtrmm, cblas_dtrmv, cblas_dtrsm, cblas_dtrsv, cblas_daxpby, cblas_dgeadd, cblas_dgemmt, cblas_dgemmtr,
     cblas_idamax, cblas_idamin, cblas_idmin, cblas_idmax, cblas_dsum,cblas_dimatcopy,cblas_domatcopy,
-    cblas_damax, cblas_damin, cblas_dgemm_batch);
+    cblas_damax, cblas_damin, cblas_dgemm_batch,
+    cblas_dgemm_pack_get_size, cblas_dgemm_pack, cblas_dgemm_compute);
     
 @cblasobjss = (
     cblas_sasum, cblas_saxpy, cblas_saxpby,
@@ -110,7 +111,8 @@
     cblas_stbmv, cblas_stbsv, cblas_stpmv, cblas_stpsv, cblas_strmm, cblas_strmv, cblas_strsm,
     cblas_strsv, cblas_sgeadd, cblas_sgemmt, cblas_sgemmtr,
     cblas_isamax, cblas_isamin, cblas_ismin, cblas_ismax, cblas_ssum,cblas_simatcopy,cblas_somatcopy,
-    cblas_samax, cblas_samin, cblas_sgemm_batch);
+    cblas_samax, cblas_samin, cblas_sgemm_batch,
+    cblas_sgemm_pack_get_size, cblas_sgemm_pack, cblas_sgemm_compute);
 
 @cblasobjsz = (
     cblas_dzasum, cblas_dznrm2, cblas_zaxpy, cblas_zcopy, cblas_zdotc, cblas_zdotu, cblas_zdscal,
@@ -125,7 +127,8 @@
 
 @cblasobjs = (  cblas_xerbla );
 
-@bfcblasobjs = (cblas_sbgemm, cblas_sbgemmt, cblas_sbgemmtr, cblas_sbgemv, cblas_sbdot, cblas_sbstobf16, cblas_sbdtobf16, cblas_sbf16tos, cblas_dbf16tod, cblas_sbgemm_batch);
+@bfcblasobjs = (cblas_sbgemm, cblas_sbgemmt, cblas_sbgemmtr, cblas_sbgemv, cblas_sbdot, cblas_sbstobf16, cblas_sbdtobf16, cblas_sbf16tos, cblas_dbf16tod, cblas_sbgemm_batch,
+    cblas_sbgemm_pack_get_size, cblas_sbgemm_pack, cblas_sbgemm_compute);
 @hfcblasobjs = (cblas_shgemm);
 @exblasobjs = (
     qamax,qamin,qasum,qaxpy,qcabs1,qcopy,qdot,qgbmv,qgemm,

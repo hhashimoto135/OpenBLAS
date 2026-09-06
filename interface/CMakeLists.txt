@@ -137,6 +137,19 @@ endif ()
   # gemmtr is gemmt under the name adopted by the Reference BLAS
   GenerateNamedObjects("gemm.c" "RNAME" "gemmtr" ${CBLAS_FLAG})
 
+  # MKL-style packed GEMM extension, CBLAS only: gemm_pack.c provides both
+  # cblas_?gemm_pack and cblas_?gemm_pack_get_size, gemm_compute.c provides
+  # cblas_?gemm_compute.
+  if (CBLAS_FLAG EQUAL 1)
+    if (BUILD_SINGLE OR BUILD_DOUBLE)
+      GenerateNamedObjects("gemm_pack.c;gemm_compute.c" "" "" 1 "" "" false 1)
+    endif ()
+    if (BUILD_BFLOAT16)
+      GenerateNamedObjects("gemm_pack.c" "" "sbgemm_pack" 1 "" "" true "BFLOAT16")
+      GenerateNamedObjects("gemm_compute.c" "" "sbgemm_compute" 1 "" "" true "BFLOAT16")
+    endif ()
+  endif ()
+
   # max and imax are compiled 4 times
   GenerateNamedObjects("max.c" "" "" ${CBLAS_FLAG})
   GenerateNamedObjects("max.c" "USE_ABS" "amax" ${CBLAS_FLAG})

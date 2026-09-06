@@ -2062,6 +2062,41 @@ int zgemm_batch_thread(blas_arg_t * queue, BLASLONG nums);
 int sbgemm_batch_thread(blas_arg_t * queue, BLASLONG nums);
 // int shgemm_batch_thread(blas_arg_t * queue, BLASLONG nums);
 
+/* MKL-style packed GEMM extension, see driver/level3/gemm_packed.c.
+ * The identifiers name the operand in the driver's column-major orientation:
+ * A is the inner operand copied with GEMM_ITCOPY/GEMM_INCOPY, B the outer
+ * operand copied with GEMM_ONCOPY/GEMM_OTCOPY. */
+#define GEMM_PACKED_MAGIC        0x4B435047u
+#define GEMM_PACKED_VERSION      1u
+#define GEMM_PACKED_ALIGN        64
+/* Bytes reserved for the header at the start of a packed buffer. */
+#define GEMM_PACKED_HEADER_BYTES 128
+/* Readable bytes kept after the last panel. The GEMM kernels are written for
+ * panels that sit inside the large scratch buffer of a regular GEMM and read a
+ * few K steps past the end of a panel (up to about 2 KiB with the Core2
+ * kernels); this tail keeps those reads inside the caller's buffer. */
+#define GEMM_PACKED_TAIL_GUARD   16384
+#define GEMM_PACKED_IDENTIFIER_A 0
+#define GEMM_PACKED_IDENTIFIER_B 1
+
+size_t sgemm_packed_size(BLASLONG extent, BLASLONG k);
+size_t dgemm_packed_size(BLASLONG extent, BLASLONG k);
+size_t sbgemm_packed_size(BLASLONG extent, BLASLONG k);
+
+int sgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
+                      float alpha, float *src, BLASLONG ld, void *dest);
+int dgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
+                      double alpha, double *src, BLASLONG ld, void *dest);
+int sbgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
+                       float alpha, bfloat16 *src, BLASLONG ld, void *dest);
+
+int sgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
+                         float *sa, float *sb);
+int dgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
+                         double *sa, double *sb);
+int sbgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
+                          bfloat16 *sa, bfloat16 *sb);
+
 #ifdef __CUDACC__
 }
 #endif

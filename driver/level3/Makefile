@@ -50,7 +50,7 @@ endif
 
 ifeq ($(BUILD_BFLOAT16),1)
 BBLASOBJS       += bgemm_nn.$(SUFFIX) bgemm_nt.$(SUFFIX) bgemm_tn.$(SUFFIX) bgemm_tt.$(SUFFIX)
-SBBLASOBJS       += sbgemm_nn.$(SUFFIX) sbgemm_nt.$(SUFFIX) sbgemm_tn.$(SUFFIX) sbgemm_tt.$(SUFFIX)
+SBBLASOBJS       += sbgemm_nn.$(SUFFIX) sbgemm_nt.$(SUFFIX) sbgemm_tn.$(SUFFIX) sbgemm_tt.$(SUFFIX) sbgemm_packed.$(SUFFIX)
 endif
 
 ifeq ($(BUILD_HFLOAT16),1)
@@ -71,7 +71,8 @@ SBLASOBJS	+= \
 	ssyrk_UN.$(SUFFIX) ssyrk_UT.$(SUFFIX) ssyrk_LN.$(SUFFIX) ssyrk_LT.$(SUFFIX) \
 	ssyr2k_UN.$(SUFFIX) ssyr2k_UT.$(SUFFIX) ssyr2k_LN.$(SUFFIX) ssyr2k_LT.$(SUFFIX) \
 	ssyrk_kernel_U.$(SUFFIX)  ssyrk_kernel_L.$(SUFFIX) \
-	ssyr2k_kernel_U.$(SUFFIX) ssyr2k_kernel_L.$(SUFFIX) sgemm_batch_thread.$(SUFFIX)
+	ssyr2k_kernel_U.$(SUFFIX) ssyr2k_kernel_L.$(SUFFIX) sgemm_batch_thread.$(SUFFIX) \
+	sgemm_packed.$(SUFFIX)
 
 DBLASOBJS	+= \
 	dgemm_nn.$(SUFFIX) dgemm_nt.$(SUFFIX) dgemm_tn.$(SUFFIX) dgemm_tt.$(SUFFIX) \
@@ -87,7 +88,8 @@ DBLASOBJS	+= \
 	dsyrk_UN.$(SUFFIX) dsyrk_UT.$(SUFFIX) dsyrk_LN.$(SUFFIX) dsyrk_LT.$(SUFFIX) \
 	dsyr2k_UN.$(SUFFIX) dsyr2k_UT.$(SUFFIX) dsyr2k_LN.$(SUFFIX) dsyr2k_LT.$(SUFFIX) \
 	dsyrk_kernel_U.$(SUFFIX)  dsyrk_kernel_L.$(SUFFIX) \
-	dsyr2k_kernel_U.$(SUFFIX) dsyr2k_kernel_L.$(SUFFIX) dgemm_batch_thread.$(SUFFIX)
+	dsyr2k_kernel_U.$(SUFFIX) dsyr2k_kernel_L.$(SUFFIX) dgemm_batch_thread.$(SUFFIX) \
+	dgemm_packed.$(SUFFIX)
 
 QBLASOBJS	+= \
 	qgemm_nn.$(SUFFIX) qgemm_nt.$(SUFFIX) qgemm_tn.$(SUFFIX) qgemm_tt.$(SUFFIX) \
@@ -416,6 +418,15 @@ shgemm_tn.$(SUFFIX) : gemm.c level3.c ../../param.h
 
 shgemm_tt.$(SUFFIX) : gemm.c level3.c ../../param.h
 	$(CC) $(CFLAGS) $(BLOCKS) -c -DHFLOAT16 -UDOUBLE -UCOMPLEX -DTT $< -o $(@F)
+
+sbgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
+	$(CC) $(CFLAGS) $(BLOCKS) -c -DBFLOAT16 -UDOUBLE -UCOMPLEX $< -o $(@F)
+
+sgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
+	$(CC) $(CFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX $< -o $(@F)
+
+dgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
+	$(CC) $(CFLAGS) $(BLOCKS) -c -DDOUBLE -UCOMPLEX $< -o $(@F)
 
 sgemm_nn.$(SUFFIX) : gemm.c level3.c ../../param.h
 	$(CC) $(CFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX -DNN $< -o $(@F)
@@ -2847,6 +2858,15 @@ shgemm_tn.$(PSUFFIX) : gemm.c level3.c ../../param.h
 
 shgemm_tt.$(PSUFFIX) : gemm.c level3.c ../../param.h
 	$(CC) $(PFLAGS) $(BLOCKS) -c -DHFLOAT16 -UDOUBLE -UCOMPLEX -DTT $< -o $(@F)
+
+sbgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
+	$(CC) $(PFLAGS) $(BLOCKS) -c -DBFLOAT16 -UDOUBLE -UCOMPLEX $< -o $(@F)
+
+sgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
+	$(CC) $(PFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX $< -o $(@F)
+
+dgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
+	$(CC) $(PFLAGS) $(BLOCKS) -c -DDOUBLE -UCOMPLEX $< -o $(@F)
 
 sgemm_nn.$(PSUFFIX) : gemm.c level3.c ../../param.h
 	$(CC) $(PFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX -DNN $< -o $(@F)

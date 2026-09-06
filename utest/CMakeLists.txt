@@ -84,7 +84,15 @@ ${DIR_EXT}/test_ztrsv.c
 ${DIR_EXT}/test_ctrsv.c
 ${DIR_EXT}/test_zgemm.c
 ${DIR_EXT}/test_cgemm.c
+${DIR_EXT}/test_sgemm_pack.c
+${DIR_EXT}/test_dgemm_pack.c
 )
+if (BUILD_BFLOAT16)
+set(OpenBLAS_utest_ext_src
+  ${OpenBLAS_utest_ext_src}
+  ${DIR_EXT}/test_sbgemm_pack.c
+  )
+endif ()
 
 # crashing on travis cl with an error code suggesting resource not found
 if (NOT MSVC)

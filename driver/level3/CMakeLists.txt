@@ -28,6 +28,12 @@ foreach (GEMM_DEFINE ${GEMM_DEFINES})
   endif ()
 endforeach ()
 
+# MKL-style packed GEMM driver (pack_get_size / pack / compute), real types only.
+GenerateNamedObjects("gemm_packed.c" "" "gemm_packed" 0 "" "" false 1)
+if (BUILD_BFLOAT16)
+  GenerateNamedObjects("gemm_packed.c" "" "gemm_packed" 0 "" "" false "BFLOAT16")
+endif ()
+
 if ( BUILD_COMPLEX16 AND NOT  BUILD_DOUBLE)
 foreach (GEMM_DEFINE ${GEMM_DEFINES})
   string(TOLOWER ${GEMM_DEFINE} GEMM_DEFINE_LC)

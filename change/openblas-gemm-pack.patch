@@ -1,0 +1,3486 @@
+diff --git a/cblas.h b/cblas.h
+index 9eb70281b..823ee752b 100644
+--- a/cblas.h
++++ b/cblas.h
+@@ -107,6 +107,12 @@ typedef enum CBLAS_UPLO      {CblasUpper=121, CblasLower=122} CBLAS_UPLO;
+ typedef enum CBLAS_DIAG      {CblasNonUnit=131, CblasUnit=132} CBLAS_DIAG;
+ typedef enum CBLAS_SIDE      {CblasLeft=141, CblasRight=142} CBLAS_SIDE;
+ typedef CBLAS_ORDER CBLAS_LAYOUT;
++
++/* Packed GEMM extension (cblas_?gemm_pack_get_size, cblas_?gemm_pack,
++ * cblas_?gemm_compute). CblasPacked is passed in place of a CBLAS_TRANSPOSE
++ * value to cblas_?gemm_compute for an operand that was packed beforehand. */
++typedef enum CBLAS_IDENTIFIER {CblasAMatrix=161, CblasBMatrix=162} CBLAS_IDENTIFIER;
++typedef enum CBLAS_STORAGE    {CblasPacked=151} CBLAS_STORAGE;
+ 	
+ float  cblas_sdsdot(OPENBLAS_CONST blasint n, OPENBLAS_CONST float alpha, OPENBLAS_CONST float *x, OPENBLAS_CONST blasint incx, OPENBLAS_CONST float *y, OPENBLAS_CONST blasint incy);
+ double cblas_dsdot (OPENBLAS_CONST blasint n, OPENBLAS_CONST float *x, OPENBLAS_CONST blasint incx, OPENBLAS_CONST float *y, OPENBLAS_CONST blasint incy);
+@@ -341,6 +347,22 @@ void cblas_sgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLA
+ 		 OPENBLAS_CONST float alpha, OPENBLAS_CONST float *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST float *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
+ void cblas_dgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		 OPENBLAS_CONST double alpha, OPENBLAS_CONST double *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST double *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST double beta, double *C, OPENBLAS_CONST blasint ldc);
++
++/* Packed GEMM: size in bytes of the buffer that holds one packed operand. The buffer needs no alignment beyond
++ * that of its element type; the size includes the slack used to align the packed panels internally. */
++size_t cblas_sgemm_pack_get_size(OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K);
++size_t cblas_dgemm_pack_get_size(OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K);
++/* Packed GEMM: pack alpha * op(src) as operand `identifier` of an M x N x K product into dest. */
++void cblas_sgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++		      OPENBLAS_CONST float alpha, OPENBLAS_CONST float *src, OPENBLAS_CONST blasint ld, float *dest);
++void cblas_dgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++		      OPENBLAS_CONST double alpha, OPENBLAS_CONST double *src, OPENBLAS_CONST blasint ld, double *dest);
++/* Packed GEMM: C := alpha * op(A) * op(B) + beta * C, where TransA/TransB are CBLAS_TRANSPOSE values or CblasPacked and alpha comes from the packed operand(s). */
++void cblas_sgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++		         OPENBLAS_CONST float *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST float *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
++void cblas_dgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++		         OPENBLAS_CONST double *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST double *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST double beta, double *C, OPENBLAS_CONST blasint ldc);
++
+ void cblas_cgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		 OPENBLAS_CONST void *alpha, OPENBLAS_CONST void *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST void *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST void *beta, void *C, OPENBLAS_CONST blasint ldc);
+ void cblas_cgemm3m(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+@@ -496,6 +518,12 @@ void cblas_bgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLA
+ 		    OPENBLAS_CONST bfloat16 alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST bfloat16 beta, bfloat16 *C, OPENBLAS_CONST blasint ldc);
+ void   cblas_sbgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		    OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
++/* Packed GEMM for bfloat16 inputs with float accumulation, see cblas_sgemm_pack_get_size, cblas_sgemm_pack, and cblas_sgemm_compute. */
++size_t cblas_sbgemm_pack_get_size(OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K);
++void   cblas_sbgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++		         OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *src, OPENBLAS_CONST blasint ld, bfloat16 *dest);
++void   cblas_sbgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++		            OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
+ void cblas_sbgemm_batch(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE * TransA_array, OPENBLAS_CONST enum CBLAS_TRANSPOSE * TransB_array, OPENBLAS_CONST blasint * M_array, OPENBLAS_CONST blasint * N_array, OPENBLAS_CONST blasint * K_array,
+ 		       OPENBLAS_CONST float * alpha_array, OPENBLAS_CONST bfloat16 ** A_array, OPENBLAS_CONST blasint * lda_array, OPENBLAS_CONST bfloat16 ** B_array, OPENBLAS_CONST blasint * ldb_array, OPENBLAS_CONST float * beta_array, float ** C_array, OPENBLAS_CONST blasint * ldc_array, OPENBLAS_CONST blasint group_count, OPENBLAS_CONST blasint * group_size);
+ 
+diff --git a/common_level3.h b/common_level3.h
+index 8399b5b01..880567f63 100644
+--- a/common_level3.h
++++ b/common_level3.h
+@@ -2062,6 +2062,41 @@ int zgemm_batch_thread(blas_arg_t * queue, BLASLONG nums);
+ int sbgemm_batch_thread(blas_arg_t * queue, BLASLONG nums);
+ // int shgemm_batch_thread(blas_arg_t * queue, BLASLONG nums);
+ 
++/* MKL-style packed GEMM extension, see driver/level3/gemm_packed.c.
++ * The identifiers name the operand in the driver's column-major orientation:
++ * A is the inner operand copied with GEMM_ITCOPY/GEMM_INCOPY, B the outer
++ * operand copied with GEMM_ONCOPY/GEMM_OTCOPY. */
++#define GEMM_PACKED_MAGIC        0x4B435047u
++#define GEMM_PACKED_VERSION      1u
++#define GEMM_PACKED_ALIGN        64
++/* Bytes reserved for the header at the start of a packed buffer. */
++#define GEMM_PACKED_HEADER_BYTES 128
++/* Readable bytes kept after the last panel. The GEMM kernels are written for
++ * panels that sit inside the large scratch buffer of a regular GEMM and read a
++ * few K steps past the end of a panel (up to about 2 KiB with the Core2
++ * kernels); this tail keeps those reads inside the caller's buffer. */
++#define GEMM_PACKED_TAIL_GUARD   16384
++#define GEMM_PACKED_IDENTIFIER_A 0
++#define GEMM_PACKED_IDENTIFIER_B 1
++
++size_t sgemm_packed_size(BLASLONG extent, BLASLONG k);
++size_t dgemm_packed_size(BLASLONG extent, BLASLONG k);
++size_t sbgemm_packed_size(BLASLONG extent, BLASLONG k);
++
++int sgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
++                      float alpha, float *src, BLASLONG ld, void *dest);
++int dgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
++                      double alpha, double *src, BLASLONG ld, void *dest);
++int sbgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
++                       float alpha, bfloat16 *src, BLASLONG ld, void *dest);
++
++int sgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
++                         float *sa, float *sb);
++int dgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
++                         double *sa, double *sb);
++int sbgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
++                          bfloat16 *sa, bfloat16 *sb);
++
+ #ifdef __CUDACC__
+ }
+ #endif
+diff --git a/driver/level3/CMakeLists.txt b/driver/level3/CMakeLists.txt
+index 5024331da..f08957c75 100644
+--- a/driver/level3/CMakeLists.txt
++++ b/driver/level3/CMakeLists.txt
+@@ -28,6 +28,12 @@ foreach (GEMM_DEFINE ${GEMM_DEFINES})
+   endif ()
+ endforeach ()
+ 
++# MKL-style packed GEMM driver (pack_get_size / pack / compute), real types only.
++GenerateNamedObjects("gemm_packed.c" "" "gemm_packed" 0 "" "" false 1)
++if (BUILD_BFLOAT16)
++  GenerateNamedObjects("gemm_packed.c" "" "gemm_packed" 0 "" "" false "BFLOAT16")
++endif ()
++
+ if ( BUILD_COMPLEX16 AND NOT  BUILD_DOUBLE)
+ foreach (GEMM_DEFINE ${GEMM_DEFINES})
+   string(TOLOWER ${GEMM_DEFINE} GEMM_DEFINE_LC)
+diff --git a/driver/level3/Makefile b/driver/level3/Makefile
+index 70655d9cd..63564acf9 100644
+--- a/driver/level3/Makefile
++++ b/driver/level3/Makefile
+@@ -50,7 +50,7 @@ endif
+ 
+ ifeq ($(BUILD_BFLOAT16),1)
+ BBLASOBJS       += bgemm_nn.$(SUFFIX) bgemm_nt.$(SUFFIX) bgemm_tn.$(SUFFIX) bgemm_tt.$(SUFFIX)
+-SBBLASOBJS       += sbgemm_nn.$(SUFFIX) sbgemm_nt.$(SUFFIX) sbgemm_tn.$(SUFFIX) sbgemm_tt.$(SUFFIX)
++SBBLASOBJS       += sbgemm_nn.$(SUFFIX) sbgemm_nt.$(SUFFIX) sbgemm_tn.$(SUFFIX) sbgemm_tt.$(SUFFIX) sbgemm_packed.$(SUFFIX)
+ endif
+ 
+ ifeq ($(BUILD_HFLOAT16),1)
+@@ -71,7 +71,8 @@ SBLASOBJS	+= \
+ 	ssyrk_UN.$(SUFFIX) ssyrk_UT.$(SUFFIX) ssyrk_LN.$(SUFFIX) ssyrk_LT.$(SUFFIX) \
+ 	ssyr2k_UN.$(SUFFIX) ssyr2k_UT.$(SUFFIX) ssyr2k_LN.$(SUFFIX) ssyr2k_LT.$(SUFFIX) \
+ 	ssyrk_kernel_U.$(SUFFIX)  ssyrk_kernel_L.$(SUFFIX) \
+-	ssyr2k_kernel_U.$(SUFFIX) ssyr2k_kernel_L.$(SUFFIX) sgemm_batch_thread.$(SUFFIX)
++	ssyr2k_kernel_U.$(SUFFIX) ssyr2k_kernel_L.$(SUFFIX) sgemm_batch_thread.$(SUFFIX) \
++	sgemm_packed.$(SUFFIX)
+ 
+ DBLASOBJS	+= \
+ 	dgemm_nn.$(SUFFIX) dgemm_nt.$(SUFFIX) dgemm_tn.$(SUFFIX) dgemm_tt.$(SUFFIX) \
+@@ -87,7 +88,8 @@ DBLASOBJS	+= \
+ 	dsyrk_UN.$(SUFFIX) dsyrk_UT.$(SUFFIX) dsyrk_LN.$(SUFFIX) dsyrk_LT.$(SUFFIX) \
+ 	dsyr2k_UN.$(SUFFIX) dsyr2k_UT.$(SUFFIX) dsyr2k_LN.$(SUFFIX) dsyr2k_LT.$(SUFFIX) \
+ 	dsyrk_kernel_U.$(SUFFIX)  dsyrk_kernel_L.$(SUFFIX) \
+-	dsyr2k_kernel_U.$(SUFFIX) dsyr2k_kernel_L.$(SUFFIX) dgemm_batch_thread.$(SUFFIX)
++	dsyr2k_kernel_U.$(SUFFIX) dsyr2k_kernel_L.$(SUFFIX) dgemm_batch_thread.$(SUFFIX) \
++	dgemm_packed.$(SUFFIX)
+ 
+ QBLASOBJS	+= \
+ 	qgemm_nn.$(SUFFIX) qgemm_nt.$(SUFFIX) qgemm_tn.$(SUFFIX) qgemm_tt.$(SUFFIX) \
+@@ -417,6 +419,15 @@ shgemm_tn.$(SUFFIX) : gemm.c level3.c ../../param.h
+ shgemm_tt.$(SUFFIX) : gemm.c level3.c ../../param.h
+ 	$(CC) $(CFLAGS) $(BLOCKS) -c -DHFLOAT16 -UDOUBLE -UCOMPLEX -DTT $< -o $(@F)
+ 
++sbgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
++	$(CC) $(CFLAGS) $(BLOCKS) -c -DBFLOAT16 -UDOUBLE -UCOMPLEX $< -o $(@F)
++
++sgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
++	$(CC) $(CFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX $< -o $(@F)
++
++dgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
++	$(CC) $(CFLAGS) $(BLOCKS) -c -DDOUBLE -UCOMPLEX $< -o $(@F)
++
+ sgemm_nn.$(SUFFIX) : gemm.c level3.c ../../param.h
+ 	$(CC) $(CFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX -DNN $< -o $(@F)
+ 
+@@ -2848,6 +2859,15 @@ shgemm_tn.$(PSUFFIX) : gemm.c level3.c ../../param.h
+ shgemm_tt.$(PSUFFIX) : gemm.c level3.c ../../param.h
+ 	$(CC) $(PFLAGS) $(BLOCKS) -c -DHFLOAT16 -UDOUBLE -UCOMPLEX -DTT $< -o $(@F)
+ 
++sbgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
++	$(CC) $(PFLAGS) $(BLOCKS) -c -DBFLOAT16 -UDOUBLE -UCOMPLEX $< -o $(@F)
++
++sgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
++	$(CC) $(PFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX $< -o $(@F)
++
++dgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
++	$(CC) $(PFLAGS) $(BLOCKS) -c -DDOUBLE -UCOMPLEX $< -o $(@F)
++
+ sgemm_nn.$(PSUFFIX) : gemm.c level3.c ../../param.h
+ 	$(CC) $(PFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX -DNN $< -o $(@F)
+ 
+diff --git a/exports/gensymbol b/exports/gensymbol
+index bd4652b0c..b19d325cb 100755
+--- a/exports/gensymbol
++++ b/exports/gensymbol
+@@ -100,6 +100,7 @@ cblasobjsd="
+     cblas_dtrmm cblas_dtrmv cblas_dtrsm cblas_dtrsv cblas_daxpby cblas_dgeadd cblas_dgemmt cblas_dgemmtr
+     cblas_idamax cblas_idamin cblas_idmin cblas_idmax cblas_dsum cblas_dimatcopy cblas_domatcopy
+     cblas_damax  cblas_damin cblas_dgemm_batch
++    cblas_dgemm_pack_get_size cblas_dgemm_pack cblas_dgemm_compute
+     "
+ 
+ cblasobjss="
+@@ -112,6 +113,7 @@ cblasobjss="
+     cblas_strsv cblas_sgeadd cblas_sgemmt cblas_sgemmtr
+     cblas_isamax cblas_isamin cblas_ismin cblas_ismax cblas_ssum cblas_simatcopy cblas_somatcopy
+     cblas_samax cblas_samin cblas_sgemm_batch
++    cblas_sgemm_pack_get_size cblas_sgemm_pack cblas_sgemm_compute
+     "
+ 
+ cblasobjsz="
+@@ -128,7 +130,7 @@ cblasobjsz="
+ 
+ cblasobjs="cblas_xerbla"
+ 
+-bfcblasobjs="cblas_sbgemm cblas_sbgemv cblas_sbdot cblas_sbstobf16 cblas_sbdtobf16 cblas_sbf16tos cblas_dbf16tod cblas_sbgemm_batch"
++bfcblasobjs="cblas_sbgemm cblas_sbgemv cblas_sbdot cblas_sbstobf16 cblas_sbdtobf16 cblas_sbf16tos cblas_dbf16tod cblas_sbgemm_batch cblas_sbgemm_pack_get_size cblas_sbgemm_pack cblas_sbgemm_compute"
+ hfcblasobjs="cblas_shgemm"
+ 
+ exblasobjs="
+diff --git a/exports/gensymbol.pl b/exports/gensymbol.pl
+index 72e30dff2..de63cd01b 100644
+--- a/exports/gensymbol.pl
++++ b/exports/gensymbol.pl
+@@ -99,7 +99,8 @@
+     cblas_dsyr2k, cblas_dsyr, cblas_dsyrk, cblas_dtbmv, cblas_dtbsv, cblas_dtpmv, cblas_dtpsv,
+     cblas_dtrmm, cblas_dtrmv, cblas_dtrsm, cblas_dtrsv, cblas_daxpby, cblas_dgeadd, cblas_dgemmt, cblas_dgemmtr,
+     cblas_idamax, cblas_idamin, cblas_idmin, cblas_idmax, cblas_dsum,cblas_dimatcopy,cblas_domatcopy,
+-    cblas_damax, cblas_damin, cblas_dgemm_batch);
++    cblas_damax, cblas_damin, cblas_dgemm_batch,
++    cblas_dgemm_pack_get_size, cblas_dgemm_pack, cblas_dgemm_compute);
+     
+ @cblasobjss = (
+     cblas_sasum, cblas_saxpy, cblas_saxpby,
+@@ -110,7 +111,8 @@
+     cblas_stbmv, cblas_stbsv, cblas_stpmv, cblas_stpsv, cblas_strmm, cblas_strmv, cblas_strsm,
+     cblas_strsv, cblas_sgeadd, cblas_sgemmt, cblas_sgemmtr,
+     cblas_isamax, cblas_isamin, cblas_ismin, cblas_ismax, cblas_ssum,cblas_simatcopy,cblas_somatcopy,
+-    cblas_samax, cblas_samin, cblas_sgemm_batch);
++    cblas_samax, cblas_samin, cblas_sgemm_batch,
++    cblas_sgemm_pack_get_size, cblas_sgemm_pack, cblas_sgemm_compute);
+ 
+ @cblasobjsz = (
+     cblas_dzasum, cblas_dznrm2, cblas_zaxpy, cblas_zcopy, cblas_zdotc, cblas_zdotu, cblas_zdscal,
+@@ -125,7 +127,8 @@
+ 
+ @cblasobjs = (  cblas_xerbla );
+ 
+-@bfcblasobjs = (cblas_sbgemm, cblas_sbgemmt, cblas_sbgemmtr, cblas_sbgemv, cblas_sbdot, cblas_sbstobf16, cblas_sbdtobf16, cblas_sbf16tos, cblas_dbf16tod, cblas_sbgemm_batch);
++@bfcblasobjs = (cblas_sbgemm, cblas_sbgemmt, cblas_sbgemmtr, cblas_sbgemv, cblas_sbdot, cblas_sbstobf16, cblas_sbdtobf16, cblas_sbf16tos, cblas_dbf16tod, cblas_sbgemm_batch,
++    cblas_sbgemm_pack_get_size, cblas_sbgemm_pack, cblas_sbgemm_compute);
+ @hfcblasobjs = (cblas_shgemm);
+ @exblasobjs = (
+     qamax,qamin,qasum,qaxpy,qcabs1,qcopy,qdot,qgbmv,qgemm,
+diff --git a/interface/CMakeLists.txt b/interface/CMakeLists.txt
+index ee7d40d38..b12f7cfd8 100644
+--- a/interface/CMakeLists.txt
++++ b/interface/CMakeLists.txt
+@@ -137,6 +137,19 @@ endif ()
+   # gemmtr is gemmt under the name adopted by the Reference BLAS
+   GenerateNamedObjects("gemm.c" "RNAME" "gemmtr" ${CBLAS_FLAG})
+ 
++  # MKL-style packed GEMM extension, CBLAS only: gemm_pack.c provides both
++  # cblas_?gemm_pack and cblas_?gemm_pack_get_size, gemm_compute.c provides
++  # cblas_?gemm_compute.
++  if (CBLAS_FLAG EQUAL 1)
++    if (BUILD_SINGLE OR BUILD_DOUBLE)
++      GenerateNamedObjects("gemm_pack.c;gemm_compute.c" "" "" 1 "" "" false 1)
++    endif ()
++    if (BUILD_BFLOAT16)
++      GenerateNamedObjects("gemm_pack.c" "" "sbgemm_pack" 1 "" "" true "BFLOAT16")
++      GenerateNamedObjects("gemm_compute.c" "" "sbgemm_compute" 1 "" "" true "BFLOAT16")
++    endif ()
++  endif ()
++
+   # max and imax are compiled 4 times
+   GenerateNamedObjects("max.c" "" "" ${CBLAS_FLAG})
+   GenerateNamedObjects("max.c" "USE_ABS" "amax" ${CBLAS_FLAG})
+diff --git a/interface/Makefile b/interface/Makefile
+index 2b6b60c14..4729d22fa 100644
+--- a/interface/Makefile
++++ b/interface/Makefile
+@@ -322,7 +322,8 @@ CSBLAS2OBJS   = \
+ CSBLAS3OBJS   = \
+ 	cblas_sgemm.$(SUFFIX) cblas_ssymm.$(SUFFIX) cblas_strmm.$(SUFFIX) cblas_strsm.$(SUFFIX) \
+ 	cblas_ssyrk.$(SUFFIX) cblas_ssyr2k.$(SUFFIX) cblas_somatcopy.$(SUFFIX)  cblas_simatcopy.$(SUFFIX)\
+-	cblas_sgeadd.$(SUFFIX) cblas_sgemmt.$(SUFFIX) cblas_sgemmtr.$(SUFFIX) cblas_sgemm_batch.$(SUFFIX) cblas_sgemm_batch_strided.$(SUFFIX)
++	cblas_sgeadd.$(SUFFIX) cblas_sgemmt.$(SUFFIX) cblas_sgemmtr.$(SUFFIX) cblas_sgemm_batch.$(SUFFIX) cblas_sgemm_batch_strided.$(SUFFIX) \
++	cblas_sgemm_pack.$(SUFFIX) cblas_sgemm_compute.$(SUFFIX)
+ 
+ ifeq ($(BUILD_BFLOAT16),1)
+ CBBLAS3OBJS = cblas_bgemm.$(SUFFIX)
+@@ -330,7 +331,8 @@ CBBLAS2OBJS = cblas_bgemv.$(SUFFIX)
+ CBBLAS1OBJS = cblas_bscal.$(SUFFIX)
+ CSBBLAS1OBJS = cblas_sbdot.$(SUFFIX)
+ CSBBLAS2OBJS = cblas_sbgemv.$(SUFFIX)
+-CSBBLAS3OBJS = cblas_sbgemm.$(SUFFIX) cblas_sbgemmt.$(SUFFIX) cblas_sbgemmtr.$(SUFFIX) cblas_sbgemm_batch.$(SUFFIX) cblas_sbgemm_batch_strided.$(SUFFIX)
++CSBBLAS3OBJS = cblas_sbgemm.$(SUFFIX) cblas_sbgemmt.$(SUFFIX) cblas_sbgemmtr.$(SUFFIX) cblas_sbgemm_batch.$(SUFFIX) cblas_sbgemm_batch_strided.$(SUFFIX) \
++	cblas_sbgemm_pack.$(SUFFIX) cblas_sbgemm_compute.$(SUFFIX)
+ CSBEXTOBJS   = cblas_sbstobf16.$(SUFFIX) cblas_sbdtobf16.$(SUFFIX) cblas_sbf16tos.$(SUFFIX) cblas_dbf16tod.$(SUFFIX)
+ ifeq ($(ONLY_CBLAS),1)
+ CSBEXTOBJS    += sbstobf16.$(SUFFIX) sbdtobf16.$(SUFFIX) sbf16tos.$(SUFFIX) dbf16tod.$(SUFFIX)
+@@ -359,7 +361,8 @@ CDBLAS2OBJS   = \
+ CDBLAS3OBJS   += \
+ 	cblas_dgemm.$(SUFFIX) cblas_dsymm.$(SUFFIX) cblas_dtrmm.$(SUFFIX) cblas_dtrsm.$(SUFFIX) \
+ 	cblas_dsyrk.$(SUFFIX) cblas_dsyr2k.$(SUFFIX) cblas_domatcopy.$(SUFFIX)  cblas_dimatcopy.$(SUFFIX) \
+-        cblas_dgeadd.$(SUFFIX) cblas_dgemmt.$(SUFFIX) cblas_dgemmtr.$(SUFFIX) cblas_dgemm_batch.$(SUFFIX) cblas_dgemm_batch_strided.$(SUFFIX)
++        cblas_dgeadd.$(SUFFIX) cblas_dgemmt.$(SUFFIX) cblas_dgemmtr.$(SUFFIX) cblas_dgemm_batch.$(SUFFIX) cblas_dgemm_batch_strided.$(SUFFIX) \
++	cblas_dgemm_pack.$(SUFFIX) cblas_dgemm_compute.$(SUFFIX)
+ 
+ CCBLAS1OBJS   = \
+ 	cblas_icamax.$(SUFFIX) cblas_icamin.$(SUFFIX) cblas_scasum.$(SUFFIX)  cblas_caxpy.$(SUFFIX) \
+@@ -2046,11 +2049,21 @@ cblas_zhemv.$(SUFFIX) cblas_zhemv.$(PSUFFIX) : zhemv.c
+ cblas_sgemm.$(SUFFIX) cblas_sgemm.$(PSUFFIX) : gemm.c ../param.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
++cblas_sgemm_pack.$(SUFFIX) cblas_sgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h
++	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
++
++cblas_sgemm_compute.$(SUFFIX) cblas_sgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h
++	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
++
+ ifeq ($(BUILD_BFLOAT16),1)
+ cblas_bgemm.$(SUFFIX) cblas_bgemm.$(PSUFFIX) : gemm.c ../param.h
+ 	$(CC) -DCBLAS -DBGEMM -c $(CFLAGS) $< -o $(@F)
+ cblas_sbgemm.$(SUFFIX) cblas_sbgemm.$(PSUFFIX) : gemm.c ../param.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
++cblas_sbgemm_pack.$(SUFFIX) cblas_sbgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h
++	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
++cblas_sbgemm_compute.$(SUFFIX) cblas_sbgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h
++	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ endif
+ 
+ ifeq ($(BUILD_HFLOAT16),1)
+@@ -2061,6 +2074,12 @@ endif
+ cblas_dgemm.$(SUFFIX) cblas_dgemm.$(PSUFFIX) : gemm.c ../param.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
++cblas_dgemm_pack.$(SUFFIX) cblas_dgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h
++	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
++
++cblas_dgemm_compute.$(SUFFIX) cblas_dgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h
++	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
++
+ cblas_cgemm.$(SUFFIX) cblas_cgemm.$(PSUFFIX) : gemm.c ../param.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+diff --git a/utest/CMakeLists.txt b/utest/CMakeLists.txt
+index 1551cefda..adf42423b 100644
+--- a/utest/CMakeLists.txt
++++ b/utest/CMakeLists.txt
+@@ -84,7 +84,15 @@ ${DIR_EXT}/test_ztrsv.c
+ ${DIR_EXT}/test_ctrsv.c
+ ${DIR_EXT}/test_zgemm.c
+ ${DIR_EXT}/test_cgemm.c
++${DIR_EXT}/test_sgemm_pack.c
++${DIR_EXT}/test_dgemm_pack.c
+ )
++if (BUILD_BFLOAT16)
++set(OpenBLAS_utest_ext_src
++  ${OpenBLAS_utest_ext_src}
++  ${DIR_EXT}/test_sbgemm_pack.c
++  )
++endif ()
+ 
+ # crashing on travis cl with an error code suggesting resource not found
+ if (NOT MSVC)
+diff --git a/utest/Makefile b/utest/Makefile
+index 07de0c2fc..5c1a2b98c 100644
+--- a/utest/Makefile
++++ b/utest/Makefile
+@@ -30,6 +30,10 @@ OBJS_EXT+=$(DIR_EXT)/test_cgemv_t.o $(DIR_EXT)/test_zgemv_t.o $(DIR_EXT)/test_cg
+ OBJS_EXT+=$(DIR_EXT)/test_sgemmt.o $(DIR_EXT)/test_dgemmt.o $(DIR_EXT)/test_cgemmt.o $(DIR_EXT)/test_zgemmt.o
+ OBJS_EXT+=$(DIR_EXT)/test_ztrmv.o $(DIR_EXT)/test_ctrmv.o $(DIR_EXT)/test_ztrsv.o $(DIR_EXT)/test_ctrsv.o
+ OBJS_EXT+=$(DIR_EXT)/test_zgemm.o $(DIR_EXT)/test_cgemm.o $(DIR_EXT)/test_zgbmv.o $(DIR_EXT)/test_cgbmv.o
++OBJS_EXT+=$(DIR_EXT)/test_sgemm_pack.o $(DIR_EXT)/test_dgemm_pack.o
++ifeq ($(BUILD_BFLOAT16),1)
++OBJS_EXT+=$(DIR_EXT)/test_sbgemm_pack.o
++endif
+ 
+ ifneq ($(NO_LAPACK), 1)
+ OBJS += test_potrs.o
+diff --git a/driver/level3/gemm_packed.c b/driver/level3/gemm_packed.c
+new file mode 100644
+index 000000000..b459a9289
+--- /dev/null
++++ b/driver/level3/gemm_packed.c
+@@ -0,0 +1,612 @@
++/*********************************************************************/
++/* Copyright 2026 The OpenBLAS Project                               */
++/* All rights reserved.                                              */
++/*                                                                   */
++/* Redistribution and use in source and binary forms, with or        */
++/* without modification, are permitted provided that the following   */
++/* conditions are met:                                               */
++/*                                                                   */
++/*   1. Redistributions of source code must retain the above         */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer.                                                  */
++/*                                                                   */
++/*   2. Redistributions in binary form must reproduce the above      */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer in the documentation and/or other materials       */
++/*      provided with the distribution.                              */
++/*                                                                   */
++/*    THIS SOFTWARE IS PROVIDED BY THE OPENBLAS PROJECT ``AS IS''    */
++/*    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      */
++/*    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND      */
++/*    FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT   */
++/*    SHALL THE OPENBLAS PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY   */
++/*    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR           */
++/*    CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,          */
++/*    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,      */
++/*    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED     */
++/*    AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT    */
++/*    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)         */
++/*    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF    */
++/*    ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.                     */
++/*********************************************************************/
++
++/*
++ * Driver for the MKL-style packed GEMM extension:
++ *
++ *   ?gemm_packed_size     bytes needed for one packed operand
++ *   ?gemm_packed_pack     pack op(A) or op(B) into the blocked layout
++ *   ?gemm_packed_compute  GEMM where either operand may be pre-packed
++ *
++ * The packed layout is exactly the sequence of panels that the plain GEMM
++ * driver (level3.c) would have produced with GEMM_ITCOPY/GEMM_INCOPY for the
++ * inner operand ("A", blocked by GEMM_P along m and GEMM_Q along k) or with
++ * GEMM_ONCOPY/GEMM_OTCOPY for the outer operand ("B", blocked by GEMM_R along
++ * n and GEMM_Q along k). The compute loop below mirrors level3.c and merely
++ * substitutes a pointer into the pre-packed panels for the copy step, so the
++ * micro-kernel sees the same data as in a regular GEMM.
++ *
++ * Every block boundary is decided by gemm_packed_k_block(),
++ * gemm_packed_m_block(), and gemm_packed_n_block(). Both the pack and the
++ * compute side walk the same loops with the same helpers, which is what keeps
++ * the offsets consistent. Under DYNAMIC_ARCH the GEMM_P/Q/R, GEMM_UNROLL_*
++ * and the copy/kernel entry points all resolve through the gotoblas table, so
++ * this file is compiled once and follows whatever core was selected at run
++ * time.
++ *
++ * This file is compiled once per supported type (SINGLE, DOUBLE, BFLOAT16)
++ * and takes its function names from CNAME (sgemm_packed, dgemm_packed,
++ * sbgemm_packed).
++ */
++
++#include <stdio.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++#include "common.h"
++
++#if defined(COMPLEX) || defined(XDOUBLE) || defined(HFLOAT16) || defined(BGEMM)
++#error "gemm_packed.c supports SGEMM, DGEMM, and SBGEMM only"
++#endif
++
++#define GEMM_PACKED_CONCAT_(a, b) a##b
++#define GEMM_PACKED_CONCAT(a, b) GEMM_PACKED_CONCAT_(a, b)
++
++#define GEMM_PACKED_SIZE_FN    GEMM_PACKED_CONCAT(CNAME, _size)
++#define GEMM_PACKED_PACK_FN    GEMM_PACKED_CONCAT(CNAME, _pack)
++#define GEMM_PACKED_COMPUTE_FN GEMM_PACKED_CONCAT(CNAME, _compute)
++
++#if defined(BFLOAT16)
++#define GEMM_PACKED_TYPE_TAG 0x00007362u /* "sb" */
++#elif defined(DOUBLE)
++#define GEMM_PACKED_TYPE_TAG 0x00000064u /* "d" */
++#else
++#define GEMM_PACKED_TYPE_TAG 0x00000073u /* "s" */
++#endif
++
++#if defined(BFLOAT16)
++#if defined(DYNAMIC_ARCH)
++#define BFLOAT16_ALIGN_K gotoblas->sbgemm_align_k
++#else
++#define BFLOAT16_ALIGN_K SBGEMM_ALIGN_K
++#endif
++#endif
++
++/* Header stored in the first GEMM_PACKED_HEADER_BYTES of every packed buffer.
++ * All fields are in the internal column-major orientation used by the driver,
++ * i.e. after the CBLAS row-major swap has been applied by the interface layer.
++ * The header is copied in and out with memcpy, so the caller's buffer needs no
++ * alignment beyond that of its element type; only the panel data behind the
++ * header is placed on a GEMM_PACKED_ALIGN boundary. */
++typedef struct {
++  uint32_t magic;
++  uint32_t type_tag;
++  uint32_t version;
++  uint32_t identifier;
++  BLASLONG m;
++  BLASLONG n;
++  BLASLONG k;
++  BLASLONG gemm_p;
++  BLASLONG gemm_q;
++  BLASLONG gemm_r;
++  BLASLONG unroll_m;
++  BLASLONG unroll_n;
++  BLASLONG align_k;
++  size_t   data_offset;
++  size_t   data_size;
++  double   alpha;
++} gemm_packed_header_t;
++
++/* The header must fit in the reserved region. */
++typedef char gemm_packed_header_fits[(sizeof(gemm_packed_header_t) <= GEMM_PACKED_HEADER_BYTES) ? 1 : -1];
++
++static inline BLASLONG gemm_packed_align_k(void) {
++#if defined(BFLOAT16)
++  return (BLASLONG)BFLOAT16_ALIGN_K;
++#else
++  return 1;
++#endif
++}
++
++/* K blocking, identical to the ls loop of level3.c. */
++static inline BLASLONG gemm_packed_k_block(BLASLONG remaining) {
++  BLASLONG min_l = remaining;
++  if (min_l >= GEMM_Q * 2) {
++    min_l = GEMM_Q;
++  } else if (min_l > GEMM_Q) {
++    min_l = ((min_l / 2 + GEMM_UNROLL_M - 1) / GEMM_UNROLL_M) * GEMM_UNROLL_M;
++  }
++  return min_l;
++}
++
++/* M blocking, identical to the is loop of level3.c. */
++static inline BLASLONG gemm_packed_m_block(BLASLONG remaining) {
++  BLASLONG min_i = remaining;
++  if (min_i >= GEMM_P * 2) {
++    min_i = GEMM_P;
++  } else if (min_i > GEMM_P) {
++    min_i = ((min_i / 2 + GEMM_UNROLL_M - 1) / GEMM_UNROLL_M) * GEMM_UNROLL_M;
++  }
++  return min_i;
++}
++
++/* N blocking, identical to the js loop of level3.c. */
++static inline BLASLONG gemm_packed_n_block(BLASLONG remaining) {
++  return remaining > GEMM_R ? GEMM_R : remaining;
++}
++
++/* Padded K extent of one panel. Only BFLOAT16 kernels pad K. */
++static inline BLASLONG gemm_packed_pad_k(BLASLONG min_l) {
++  BLASLONG align = gemm_packed_align_k();
++  return (min_l + align - 1) & ~(align - 1);
++}
++
++static inline size_t gemm_packed_align_up(size_t bytes) {
++  return (bytes + GEMM_PACKED_ALIGN - 1) & ~((size_t)GEMM_PACKED_ALIGN - 1);
++}
++
++static inline char *gemm_packed_align_ptr(char *p) {
++  uintptr_t v = (uintptr_t)p;
++  v = (v + GEMM_PACKED_ALIGN - 1) & ~((uintptr_t)GEMM_PACKED_ALIGN - 1);
++  return (char *)v;
++}
++
++/* Checked size_t arithmetic. Sizes are capped at PTRDIFF_MAX, the largest
++ * object a pointer difference can span. Each returns 0 on overflow. */
++static inline int gemm_packed_add(size_t a, size_t b, size_t *out) {
++  if (a > (size_t)PTRDIFF_MAX || b > (size_t)PTRDIFF_MAX - a) return 0;
++  *out = a + b;
++  return 1;
++}
++
++static inline int gemm_packed_mul(size_t a, size_t b, size_t *out) {
++  if (b != 0 && a > (size_t)PTRDIFF_MAX / b) return 0;
++  *out = a * b;
++  return 1;
++}
++
++/* Bytes reserved for one packed panel of pad_k rows and extent columns. The
++ * column count is rounded up to the register-block width so that a copy
++ * routine which pads its tail never runs past the reservation. Returns 0 on
++ * overflow. */
++static inline int gemm_packed_panel_bytes_checked(BLASLONG pad_k, BLASLONG extent, BLASLONG unroll,
++                                                  size_t *bytes) {
++  size_t padded = (((size_t)extent + (size_t)unroll - 1) / (size_t)unroll) * (size_t)unroll;
++  size_t value;
++  if (!gemm_packed_mul((size_t)pad_k, padded, &value)) return 0;
++  if (!gemm_packed_mul(value, sizeof(IFLOAT), &value)) return 0;
++  if (!gemm_packed_add(value, GEMM_PACKED_ALIGN - 1, &value)) return 0;
++  *bytes = value & ~((size_t)GEMM_PACKED_ALIGN - 1);
++  return 1;
++}
++
++/* Unchecked form for the pack and compute loops, whose inputs have already
++ * passed ?gemm_packed_size() or the header check. */
++static inline size_t gemm_packed_panel_bytes(BLASLONG pad_k, BLASLONG extent, BLASLONG unroll) {
++  size_t bytes = 0;
++  (void)gemm_packed_panel_bytes_checked(pad_k, extent, unroll, &bytes);
++  return bytes;
++}
++
++/* The block sizes that gemm_packed_k_block() or gemm_packed_m_block() produce
++ * for one dimension, without walking the loop: `full_count` blocks of `block`
++ * followed by up to two tail blocks. */
++typedef struct {
++  size_t   full_count;
++  BLASLONG block;
++  BLASLONG tail[2];
++  int      tail_count;
++} gemm_packed_split_t;
++
++static void gemm_packed_split(BLASLONG extent, BLASLONG block, BLASLONG unroll, gemm_packed_split_t *out) {
++  BLASLONG remaining = extent;
++
++  out->block = block;
++  out->full_count = 0;
++  out->tail_count = 0;
++  if (remaining >= 2 * block) {
++    /* The loop takes `block` while at least 2 * block remain, which leaves a
++     * remainder in [block, 2 * block). */
++    out->full_count = (size_t)(remaining / block) - 1;
++    remaining -= (BLASLONG)out->full_count * block;
++  }
++  if (remaining > block) {
++    BLASLONG half = ((remaining / 2 + unroll - 1) / unroll) * unroll;
++    out->tail[0] = half;
++    out->tail[1] = remaining - half;
++    out->tail_count = 2;
++  } else if (remaining > 0) {
++    out->tail[0] = remaining;
++    out->tail_count = 1;
++  }
++}
++
++/* Bytes of all M panels for one K block of pad_k rows: the inner operand. */
++static int gemm_packed_a_row_bytes(BLASLONG pad_k, const gemm_packed_split_t *m_split, size_t *bytes) {
++  size_t total, part;
++  int i;
++
++  if (!gemm_packed_panel_bytes_checked(pad_k, m_split->block, GEMM_UNROLL_M, &part)) return 0;
++  if (!gemm_packed_mul(part, m_split->full_count, &total)) return 0;
++  for (i = 0; i < m_split->tail_count; i++) {
++    if (!gemm_packed_panel_bytes_checked(pad_k, m_split->tail[i], GEMM_UNROLL_M, &part)) return 0;
++    if (!gemm_packed_add(total, part, &total)) return 0;
++  }
++  *bytes = total;
++  return 1;
++}
++
++/* Bytes of all N panels for one K block of pad_k rows: the outer operand. */
++static int gemm_packed_b_row_bytes(BLASLONG pad_k, BLASLONG n, size_t *bytes) {
++  size_t total, part;
++
++  if (!gemm_packed_panel_bytes_checked(pad_k, GEMM_R, GEMM_UNROLL_N, &part)) return 0;
++  if (!gemm_packed_mul(part, (size_t)(n / GEMM_R), &total)) return 0;
++  if (n % GEMM_R) {
++    if (!gemm_packed_panel_bytes_checked(pad_k, n % GEMM_R, GEMM_UNROLL_N, &part)) return 0;
++    if (!gemm_packed_add(total, part, &total)) return 0;
++  }
++  *bytes = total;
++  return 1;
++}
++
++/* Data bytes of the packed operand, in closed form: the sum over the K blocks
++ * (full blocks and up to two tails) of the panel bytes of that block. This is
++ * exactly what the pack loop writes; the pack verifies that after the fact.
++ * Returns 0 on overflow. */
++static int gemm_packed_data_bytes(int identifier, BLASLONG extent, BLASLONG k, size_t *bytes) {
++  gemm_packed_split_t k_split, m_split;
++  size_t total = 0, row, part;
++  int i;
++
++  if (extent == 0 || k == 0) {
++    *bytes = 0;
++    return 1;
++  }
++
++  gemm_packed_split(k, GEMM_Q, GEMM_UNROLL_M, &k_split);
++  gemm_packed_split(extent, GEMM_P, GEMM_UNROLL_M, &m_split);
++
++  if (identifier == GEMM_PACKED_IDENTIFIER_A) {
++    if (!gemm_packed_a_row_bytes(gemm_packed_pad_k(k_split.block), &m_split, &row)) return 0;
++  } else {
++    if (!gemm_packed_b_row_bytes(gemm_packed_pad_k(k_split.block), extent, &row)) return 0;
++  }
++  if (!gemm_packed_mul(row, k_split.full_count, &total)) return 0;
++
++  for (i = 0; i < k_split.tail_count; i++) {
++    if (identifier == GEMM_PACKED_IDENTIFIER_A) {
++      if (!gemm_packed_a_row_bytes(gemm_packed_pad_k(k_split.tail[i]), &m_split, &part)) return 0;
++    } else {
++      if (!gemm_packed_b_row_bytes(gemm_packed_pad_k(k_split.tail[i]), extent, &part)) return 0;
++    }
++    if (!gemm_packed_add(total, part, &total)) return 0;
++  }
++
++  *bytes = total;
++  return 1;
++}
++
++static inline int gemm_packed_total_bytes(size_t data_bytes, size_t *bytes) {
++  size_t total = GEMM_PACKED_HEADER_BYTES + (GEMM_PACKED_ALIGN - 1) + GEMM_PACKED_TAIL_GUARD;
++  return gemm_packed_add(total, data_bytes, bytes);
++}
++
++/*
++ * Bytes needed to pack an operand with `extent` rows or columns of its own
++ * (m for A, n for B) against a K dimension of `k`. The result covers both the
++ * inner and the outer layout, because the CBLAS row-major convention swaps the
++ * operands and the caller of ?gemm_pack_get_size does not tell us the order.
++ * Returns 0 when a dimension is negative or the size does not fit.
++ */
++size_t GEMM_PACKED_SIZE_FN(BLASLONG extent, BLASLONG k) {
++  size_t a_bytes, b_bytes, total;
++
++  if (extent < 0 || k < 0) return 0;
++  if (!gemm_packed_data_bytes(GEMM_PACKED_IDENTIFIER_A, extent, k, &a_bytes)) return 0;
++  if (!gemm_packed_data_bytes(GEMM_PACKED_IDENTIFIER_B, extent, k, &b_bytes)) return 0;
++  if (!gemm_packed_total_bytes(a_bytes > b_bytes ? a_bytes : b_bytes, &total)) return 0;
++  return total;
++}
++
++/*
++ * Packs one operand.
++ *
++ *   identifier  GEMM_PACKED_IDENTIFIER_A (inner, m x k) or
++ *               GEMM_PACKED_IDENTIFIER_B (outer, k x n)
++ *   trans       0 when the operand is stored as given, 1 when op() transposes
++ *   m, n, k     dimensions of the product, internal orientation
++ *   alpha       scalar recorded in the header and applied at compute time
++ *   src, ld     source matrix in column-major storage
++ *   dest        buffer of at least ?gemm_packed_size() bytes
++ *
++ * Returns 0 on success, 1 for an invalid identifier, 2 when the packed size
++ * does not fit (so that ?gemm_packed_size() had returned 0), and 3 when the
++ * panels written disagree with the size computed in closed form, which would
++ * be an internal error.
++ */
++int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
++                        FLOAT alpha, IFLOAT *src, BLASLONG ld, void *dest) {
++  gemm_packed_header_t header;
++  char *data = gemm_packed_align_ptr((char *)dest + GEMM_PACKED_HEADER_BYTES);
++  char *cursor = data;
++  size_t expected, total;
++  BLASLONG ls, is, js, jjs, min_l, min_i, min_j, min_jj, pad_l;
++
++  if (identifier != GEMM_PACKED_IDENTIFIER_A && identifier != GEMM_PACKED_IDENTIFIER_B) return 1;
++  if (!gemm_packed_data_bytes(identifier, identifier == GEMM_PACKED_IDENTIFIER_A ? m : n, k, &expected) ||
++      !gemm_packed_total_bytes(expected, &total)) return 2;
++
++  if (identifier == GEMM_PACKED_IDENTIFIER_A) {
++    /* Mirrors ICOPY_OPERATION(min_l, min_i, a, lda, ls, is, sa) of level3.c. */
++    for (ls = 0; ls < k; ls += min_l) {
++      min_l = gemm_packed_k_block(k - ls);
++      pad_l = gemm_packed_pad_k(min_l);
++      for (is = 0; is < m; is += min_i) {
++        min_i = gemm_packed_m_block(m - is);
++        if (trans) {
++          GEMM_INCOPY(min_l, min_i, src + (ls + is * ld), ld, (IFLOAT *)cursor);
++        } else {
++          GEMM_ITCOPY(min_l, min_i, src + (is + ls * ld), ld, (IFLOAT *)cursor);
++        }
++        cursor += gemm_packed_panel_bytes(pad_l, min_i, GEMM_UNROLL_M);
++      }
++    }
++  } else {
++    /* Mirrors the jjs loop of level3.c with l1stride == 1, so that every
++     * GEMM_R-wide panel is complete and can be consumed by one kernel call. */
++    for (js = 0; js < n; js += min_j) {
++      min_j = gemm_packed_n_block(n - js);
++      for (ls = 0; ls < k; ls += min_l) {
++        min_l = gemm_packed_k_block(k - ls);
++        pad_l = gemm_packed_pad_k(min_l);
++        for (jjs = js; jjs < js + min_j; jjs += min_jj) {
++          IFLOAT *panel = (IFLOAT *)cursor + pad_l * (jjs - js);
++          min_jj = min_j + js - jjs;
++#if defined(SKYLAKEX) || defined(COOPERLAKE) || defined(SAPPHIRERAPIDS)
++          if (min_jj >= 6 * GEMM_UNROLL_N) min_jj = 6 * GEMM_UNROLL_N;
++#else
++          if (min_jj >= 3 * GEMM_UNROLL_N) min_jj = 3 * GEMM_UNROLL_N;
++          else if (min_jj > GEMM_UNROLL_N) min_jj = GEMM_UNROLL_N;
++#endif
++          if (trans) {
++            GEMM_OTCOPY(min_l, min_jj, src + (jjs + ls * ld), ld, panel);
++          } else {
++            GEMM_ONCOPY(min_l, min_jj, src + (ls + jjs * ld), ld, panel);
++          }
++        }
++        cursor += gemm_packed_panel_bytes(pad_l, min_j, GEMM_UNROLL_N);
++      }
++    }
++  }
++
++  if ((size_t)(cursor - data) != expected) return 3;
++
++  memset(&header, 0, sizeof(header));
++  header.magic       = GEMM_PACKED_MAGIC;
++  header.type_tag    = GEMM_PACKED_TYPE_TAG;
++  header.version     = GEMM_PACKED_VERSION;
++  header.identifier  = (uint32_t)identifier;
++  header.m           = m;
++  header.n           = n;
++  header.k           = k;
++  header.gemm_p      = GEMM_P;
++  header.gemm_q      = GEMM_Q;
++  header.gemm_r      = GEMM_R;
++  header.unroll_m    = GEMM_UNROLL_M;
++  header.unroll_n    = GEMM_UNROLL_N;
++  header.align_k     = gemm_packed_align_k();
++  header.data_offset = (size_t)(data - (char *)dest);
++  header.data_size   = (size_t)(cursor - data);
++  header.alpha       = (double)alpha;
++
++  memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
++  memcpy(dest, &header, sizeof(header));
++  return 0;
++}
++
++/* Returns 0 when `header`, read from the buffer at `buffer`, describes a packed
++ * operand usable for the product described by m, n, k with the expected
++ * identifier. */
++static int gemm_packed_header_check(const gemm_packed_header_t *header, const void *buffer,
++                                    int identifier, BLASLONG m, BLASLONG n, BLASLONG k) {
++  size_t expected;
++
++  if (header->magic != GEMM_PACKED_MAGIC) return 1;
++  if (header->type_tag != GEMM_PACKED_TYPE_TAG) return 1;
++  if (header->version != GEMM_PACKED_VERSION) return 1;
++  if (header->identifier != (uint32_t)identifier) return 1;
++  if (header->k != k) return 1;
++  /* The layout depends on these blocking parameters. They are constant for
++   * the life of a process on most targets, but a buffer written by another
++   * build or another core selection must be rejected rather than misread. The
++   * inner operand does not depend on GEMM_R or GEMM_UNROLL_N, and the outer
++   * operand does not depend on GEMM_P, so only what shapes each layout is
++   * compared. */
++  if (identifier == GEMM_PACKED_IDENTIFIER_A) {
++    if (header->m != m) return 1;
++    if (header->gemm_p != GEMM_P) return 1;
++  } else {
++    if (header->n != n) return 1;
++    if (header->gemm_r != GEMM_R || header->unroll_n != GEMM_UNROLL_N) return 1;
++  }
++  if (header->gemm_q != GEMM_Q || header->unroll_m != GEMM_UNROLL_M) return 1;
++  if (header->align_k != gemm_packed_align_k()) return 1;
++  /* The data offset follows from the buffer address, and the data size from
++   * the dimensions and blocking above; a header that disagrees was damaged or
++   * belongs to a buffer that was copied to a differently aligned address. */
++  if (header->data_offset !=
++      (size_t)(gemm_packed_align_ptr((char *)buffer + GEMM_PACKED_HEADER_BYTES) - (char *)buffer)) return 1;
++  if (!gemm_packed_data_bytes(identifier, identifier == GEMM_PACKED_IDENTIFIER_A ? m : n, k, &expected)) return 1;
++  if (header->data_size != expected) return 1;
++  return 0;
++}
++
++/*
++ * C := beta * C + alpha * op(A) * op(B), where either operand may be a packed
++ * buffer produced by ?gemm_packed_pack().
++ *
++ *   args        m, n, k, a, lda, b, ldb, c, ldc, alpha, beta as for the
++ *               regular driver; a and b point at the packed buffers when the
++ *               corresponding flag is set, and lda/ldb are then unused
++ *   transa/b    0 or 1, only consulted for operands that are not packed
++ *   a_packed    non-zero when args->a is a packed buffer
++ *   b_packed    non-zero when args->b is a packed buffer
++ *   sa, sb      scratch panels laid out as in interface/gemm.c
++ *
++ * The alpha applied to the product is args->alpha multiplied by the alpha
++ * recorded in each packed header.
++ *
++ * Returns 0 on success. Otherwise bit 0 is set when the packed A buffer is not
++ * usable and bit 1 when the packed B buffer is not usable; both headers are
++ * checked before returning. Nothing is written to C on failure.
++ */
++int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
++                           XFLOAT *sa, XFLOAT *sb) {
++  BLASLONG m = args->m, n = args->n, k = args->k;
++  BLASLONG lda = args->lda, ldb = args->ldb, ldc = args->ldc;
++  IFLOAT *a = (IFLOAT *)args->a;
++  IFLOAT *b = (IFLOAT *)args->b;
++  FLOAT *c = (FLOAT *)args->c;
++  FLOAT alpha = *(FLOAT *)args->alpha;
++  FLOAT beta = *(FLOAT *)args->beta;
++  gemm_packed_header_t header_a, header_b;
++  const char *a_data = NULL;
++  const char *b_data = NULL;
++  const char *a_cursor, *b_cursor;
++  IFLOAT *sa_cur, *sb_cur;
++  BLASLONG ls, is, js, jjs, min_l, min_i, min_j, min_jj, pad_l, l1stride;
++  int status = 0;
++
++  if (a_packed) {
++    memcpy(&header_a, args->a, sizeof(header_a));
++    if (gemm_packed_header_check(&header_a, args->a, GEMM_PACKED_IDENTIFIER_A, m, n, k)) status |= 1;
++  }
++  if (b_packed) {
++    memcpy(&header_b, args->b, sizeof(header_b));
++    if (gemm_packed_header_check(&header_b, args->b, GEMM_PACKED_IDENTIFIER_B, m, n, k)) status |= 2;
++  }
++  if (status) return status;
++
++  if (a_packed) {
++    a_data = (const char *)args->a + header_a.data_offset;
++    alpha *= (FLOAT)header_a.alpha;
++  }
++  if (b_packed) {
++    b_data = (const char *)args->b + header_b.data_offset;
++    alpha *= (FLOAT)header_b.alpha;
++  }
++
++  if (m == 0 || n == 0) return 0;
++
++  if (beta != ONE) {
++    GEMM_BETA(m, n, 0, beta, NULL, 0, NULL, 0, c, ldc);
++  }
++
++  if (k == 0 || alpha == ZERO) return 0;
++
++  b_cursor = b_data;
++
++  for (js = 0; js < n; js += min_j) {
++    min_j = gemm_packed_n_block(n - js);
++    a_cursor = a_data;
++
++    for (ls = 0; ls < k; ls += min_l) {
++      min_l = gemm_packed_k_block(k - ls);
++      pad_l = gemm_packed_pad_k(min_l);
++
++      if (b_packed) {
++        sb_cur = (IFLOAT *)b_cursor;
++        b_cursor += gemm_packed_panel_bytes(pad_l, min_j, GEMM_UNROLL_N);
++      } else {
++        sb_cur = sb;
++      }
++
++      /* First M block. The B panel is copied piecewise and consumed right
++       * away, exactly as in level3.c; l1stride == 0 lets the pieces overlap
++       * when there is no later M block that would need the whole panel. */
++      min_i = m;
++      l1stride = 1;
++      if (min_i >= GEMM_P * 2) {
++        min_i = GEMM_P;
++      } else if (min_i > GEMM_P) {
++        min_i = ((min_i / 2 + GEMM_UNROLL_M - 1) / GEMM_UNROLL_M) * GEMM_UNROLL_M;
++      } else {
++        l1stride = 0;
++      }
++
++      if (a_packed) {
++        sa_cur = (IFLOAT *)a_cursor;
++        a_cursor += gemm_packed_panel_bytes(pad_l, min_i, GEMM_UNROLL_M);
++      } else {
++        sa_cur = sa;
++        if (transa) {
++          GEMM_INCOPY(min_l, min_i, a + (ls + 0 * lda), lda, sa_cur);
++        } else {
++          GEMM_ITCOPY(min_l, min_i, a + (0 + ls * lda), lda, sa_cur);
++        }
++      }
++
++      if (b_packed) {
++        GEMM_KERNEL_N(min_i, min_j, min_l, alpha, sa_cur, sb_cur, c + (0 + js * ldc), ldc);
++      } else {
++        for (jjs = js; jjs < js + min_j; jjs += min_jj) {
++          IFLOAT *panel = sb_cur + pad_l * (jjs - js) * l1stride;
++          min_jj = min_j + js - jjs;
++#if defined(SKYLAKEX) || defined(COOPERLAKE) || defined(SAPPHIRERAPIDS)
++          if (min_jj >= 6 * GEMM_UNROLL_N) min_jj = 6 * GEMM_UNROLL_N;
++#else
++          if (min_jj >= 3 * GEMM_UNROLL_N) min_jj = 3 * GEMM_UNROLL_N;
++          else if (min_jj > GEMM_UNROLL_N) min_jj = GEMM_UNROLL_N;
++#endif
++          if (transb) {
++            GEMM_OTCOPY(min_l, min_jj, b + (jjs + ls * ldb), ldb, panel);
++          } else {
++            GEMM_ONCOPY(min_l, min_jj, b + (ls + jjs * ldb), ldb, panel);
++          }
++          GEMM_KERNEL_N(min_i, min_jj, min_l, alpha, sa_cur, panel, c + (0 + jjs * ldc), ldc);
++        }
++      }
++
++      /* Remaining M blocks reuse the complete B panel. */
++      for (is = min_i; is < m; is += min_i) {
++        min_i = gemm_packed_m_block(m - is);
++
++        if (a_packed) {
++          sa_cur = (IFLOAT *)a_cursor;
++          a_cursor += gemm_packed_panel_bytes(pad_l, min_i, GEMM_UNROLL_M);
++        } else {
++          sa_cur = sa;
++          if (transa) {
++            GEMM_INCOPY(min_l, min_i, a + (ls + is * lda), lda, sa_cur);
++          } else {
++            GEMM_ITCOPY(min_l, min_i, a + (is + ls * lda), lda, sa_cur);
++          }
++        }
++
++        GEMM_KERNEL_N(min_i, min_j, min_l, alpha, sa_cur, sb_cur, c + (is + js * ldc), ldc);
++      }
++    }
++  }
++
++  return 0;
++}
+diff --git a/interface/gemm_packed_common.h b/interface/gemm_packed_common.h
+new file mode 100644
+index 000000000..93404abbb
+--- /dev/null
++++ b/interface/gemm_packed_common.h
+@@ -0,0 +1,129 @@
++/*********************************************************************/
++/* Copyright 2026 The OpenBLAS Project                               */
++/* All rights reserved.                                              */
++/*                                                                   */
++/* Redistribution and use in source and binary forms, with or        */
++/* without modification, are permitted provided that the following   */
++/* conditions are met:                                               */
++/*                                                                   */
++/*   1. Redistributions of source code must retain the above         */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer.                                                  */
++/*                                                                   */
++/*   2. Redistributions in binary form must reproduce the above      */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer in the documentation and/or other materials       */
++/*      provided with the distribution.                              */
++/*                                                                   */
++/*    THIS SOFTWARE IS PROVIDED BY THE OPENBLAS PROJECT ``AS IS''    */
++/*    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      */
++/*    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND      */
++/*    FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT   */
++/*    SHALL THE OPENBLAS PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY   */
++/*    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR           */
++/*    CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,          */
++/*    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,      */
++/*    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED     */
++/*    AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT    */
++/*    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)         */
++/*    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF    */
++/*    ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.                     */
++/*********************************************************************/
++
++/* Shared helpers for the CBLAS entry points of the packed GEMM extension
++ * (interface/gemm_pack.c and interface/gemm_compute.c). */
++
++#ifndef GEMM_PACKED_COMMON_H
++#define GEMM_PACKED_COMMON_H
++
++#include <stdio.h>
++#include "common.h"
++
++#if defined(COMPLEX) || defined(XDOUBLE) || defined(HFLOAT16) || defined(BGEMM)
++#error "the packed GEMM interface supports SGEMM, DGEMM, and SBGEMM only"
++#endif
++
++#ifndef CBLAS
++#error "the packed GEMM extension provides a CBLAS interface only"
++#endif
++
++#define GEMM_PACKED_CONCAT_(a, b) a##b
++#define GEMM_PACKED_CONCAT(a, b) GEMM_PACKED_CONCAT_(a, b)
++
++#if defined(BFLOAT16)
++#define GEMM_PACKED_SIZE    sbgemm_packed_size
++#define GEMM_PACKED_PACK    sbgemm_packed_pack
++#define GEMM_PACKED_COMPUTE sbgemm_packed_compute
++#define GEMM_PACKED_PREFIX  "SBGEMM"
++#elif defined(DOUBLE)
++#define GEMM_PACKED_SIZE    dgemm_packed_size
++#define GEMM_PACKED_PACK    dgemm_packed_pack
++#define GEMM_PACKED_COMPUTE dgemm_packed_compute
++#define GEMM_PACKED_PREFIX  "DGEMM"
++#else
++#define GEMM_PACKED_SIZE    sgemm_packed_size
++#define GEMM_PACKED_PACK    sgemm_packed_pack
++#define GEMM_PACKED_COMPUTE sgemm_packed_compute
++#define GEMM_PACKED_PREFIX  "SGEMM"
++#endif
++
++/* Maps a CBLAS transpose value to the 0/1 code of the driver. Real types treat
++ * the conjugate variants as their plain counterparts, as interface/gemm.c
++ * does. Returns -1 for anything else. */
++static inline int gemm_packed_trans_code(blasint trans) {
++  switch (trans) {
++    case CblasNoTrans:
++    case CblasConjNoTrans:
++      return 0;
++    case CblasTrans:
++    case CblasConjTrans:
++      return 1;
++    default:
++      return -1;
++  }
++}
++
++/* AMX tile data must be enabled per process on Linux before the Sapphire
++ * Rapids SBGEMM copy and compute kernels may touch tile registers. This is the
++ * same request interface/gemm.c makes. Returns 0 when the kernels may run. */
++#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
++#include <unistd.h>
++#include <sys/syscall.h>
++#ifndef XFEATURE_XTILEDATA
++#define XFEATURE_XTILEDATA 18
++#endif
++#ifndef ARCH_REQ_XCOMP_PERM
++#define ARCH_REQ_XCOMP_PERM 0x1023
++#endif
++/* The permission is granted per process (Documentation/arch/x86/xstate.rst),
++ * so a successful request is remembered. The flag is only ever set to 1 and
++ * read with relaxed atomics, so concurrent first calls at worst repeat the
++ * request, which the kernel answers with success. */
++static int gemm_packed_amxtile_permission = 0;
++
++static inline int gemm_packed_request_amxtile(void) {
++  long status;
++  if (__atomic_load_n(&gemm_packed_amxtile_permission, __ATOMIC_RELAXED)) return 0;
++  status = syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA);
++  if (status != 0) {
++    fprintf(stderr, "XTILEDATA permission not granted in your device(Linux, "
++                    "Intel Sapphier Rapids), skip sbgemm calculation\n");
++    return -1;
++  }
++  __atomic_store_n(&gemm_packed_amxtile_permission, 1, __ATOMIC_RELAXED);
++  return 0;
++}
++#endif
++
++static inline int gemm_packed_kernels_ready(void) {
++#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
++#if defined(DYNAMIC_ARCH)
++  if (gotoblas->need_amxtile_permission && gemm_packed_request_amxtile() == -1) return -1;
++#elif defined(SAPPHIRERAPIDS)
++  if (gemm_packed_request_amxtile() == -1) return -1;
++#endif
++#endif
++  return 0;
++}
++
++#endif /* GEMM_PACKED_COMMON_H */
+diff --git a/interface/gemm_pack.c b/interface/gemm_pack.c
+new file mode 100644
+index 000000000..927bb86cd
+--- /dev/null
++++ b/interface/gemm_pack.c
+@@ -0,0 +1,151 @@
++/*********************************************************************/
++/* Copyright 2026 The OpenBLAS Project                               */
++/* All rights reserved.                                              */
++/*                                                                   */
++/* Redistribution and use in source and binary forms, with or        */
++/* without modification, are permitted provided that the following   */
++/* conditions are met:                                               */
++/*                                                                   */
++/*   1. Redistributions of source code must retain the above         */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer.                                                  */
++/*                                                                   */
++/*   2. Redistributions in binary form must reproduce the above      */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer in the documentation and/or other materials       */
++/*      provided with the distribution.                              */
++/*                                                                   */
++/*    THIS SOFTWARE IS PROVIDED BY THE OPENBLAS PROJECT ``AS IS''    */
++/*    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      */
++/*    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND      */
++/*    FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT   */
++/*    SHALL THE OPENBLAS PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY   */
++/*    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR           */
++/*    CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,          */
++/*    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,      */
++/*    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED     */
++/*    AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT    */
++/*    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)         */
++/*    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF    */
++/*    ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.                     */
++/*********************************************************************/
++
++/*
++ * cblas_?gemm_pack_get_size and cblas_?gemm_pack: the first two thirds of the
++ * MKL-style packed GEMM API. This file is compiled once per type with CBLAS
++ * defined and CNAME set to cblas_sgemm_pack, cblas_dgemm_pack, or
++ * cblas_sbgemm_pack; the _get_size entry point derives its name from CNAME.
++ *
++ *   size = cblas_?gemm_pack_get_size(identifier, m, n, k)
++ *   cblas_?gemm_pack(order, identifier, trans, m, n, k, alpha, src, ld, dest)
++ *
++ * The packed buffer records alpha; the product computed later by
++ * cblas_?gemm_compute is alpha * op(A) * op(B) + beta * C, with alpha taken
++ * from the packed operand(s). When both operands are packed the two recorded
++ * alphas are multiplied.
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include "common.h"
++#include "gemm_packed_common.h"
++
++#define ERROR_NAME_PACK     GEMM_PACKED_PREFIX "_PACK "
++#define ERROR_NAME_GET_SIZE GEMM_PACKED_PREFIX "_PACK_GET_SIZE "
++
++#define GEMM_PACK_GET_SIZE_NAME GEMM_PACKED_CONCAT(CNAME, _get_size)
++
++size_t GEMM_PACK_GET_SIZE_NAME(enum CBLAS_IDENTIFIER identifier, blasint m, blasint n, blasint k) {
++  blasint info = 0;
++  BLASLONG extent;
++  size_t bytes;
++
++  PRINT_DEBUG_CNAME;
++
++  if (k < 0) info = 4;
++  if (n < 0) info = 3;
++  if (m < 0) info = 2;
++  if (identifier != CblasAMatrix && identifier != CblasBMatrix) info = 1;
++
++  if (info) {
++    BLASFUNC(xerbla)(ERROR_NAME_GET_SIZE, &info, sizeof(ERROR_NAME_GET_SIZE));
++    return 0;
++  }
++
++  extent = (identifier == CblasAMatrix) ? (BLASLONG)m : (BLASLONG)n;
++  bytes = GEMM_PACKED_SIZE(extent, (BLASLONG)k);
++  if (bytes == 0) {
++    /* The packed size does not fit in memory. There is no single offending
++     * argument, so the report uses parameter 0, as other size errors do. */
++    info = 0;
++    BLASFUNC(xerbla)(ERROR_NAME_GET_SIZE, &info, sizeof(ERROR_NAME_GET_SIZE));
++  }
++  return bytes;
++}
++
++void CNAME(enum CBLAS_ORDER order, enum CBLAS_IDENTIFIER identifier, enum CBLAS_TRANSPOSE trans,
++           blasint m, blasint n, blasint k, FLOAT alpha, IFLOAT *src, blasint ld, IFLOAT *dest) {
++  blasint info = 0;
++  int internal_identifier = -1;
++  int internal_trans, status;
++  BLASLONG internal_m = 0, internal_n = 0, rows;
++
++  PRINT_DEBUG_CNAME;
++
++  internal_trans = gemm_packed_trans_code((blasint)trans);
++
++  /* The driver works in column-major orientation. A row-major matrix is the
++   * transpose of the column-major matrix with the same storage, so the two
++   * operands change roles and m and n swap, exactly as in interface/gemm.c. */
++  if (order == CblasColMajor) {
++    internal_m = m;
++    internal_n = n;
++    if (identifier == CblasAMatrix) internal_identifier = GEMM_PACKED_IDENTIFIER_A;
++    if (identifier == CblasBMatrix) internal_identifier = GEMM_PACKED_IDENTIFIER_B;
++  } else if (order == CblasRowMajor) {
++    internal_m = n;
++    internal_n = m;
++    if (identifier == CblasAMatrix) internal_identifier = GEMM_PACKED_IDENTIFIER_B;
++    if (identifier == CblasBMatrix) internal_identifier = GEMM_PACKED_IDENTIFIER_A;
++  }
++
++  /* Rows of the stored source matrix, which bound the leading dimension. */
++  rows = 0;
++  if (internal_identifier == GEMM_PACKED_IDENTIFIER_A) rows = internal_trans ? (BLASLONG)k : internal_m;
++  if (internal_identifier == GEMM_PACKED_IDENTIFIER_B) rows = internal_trans ? internal_n : (BLASLONG)k;
++
++  /* Later assignments win, so the lowest offending argument is reported. */
++  if (dest == NULL) info = 10;
++  if (ld < rows) info = 9;
++  if (src == NULL && k > 0 && (internal_identifier == GEMM_PACKED_IDENTIFIER_A ? internal_m : internal_n) > 0) info = 8;
++  if (k < 0) info = 6;
++  if (n < 0) info = 5;
++  if (m < 0) info = 4;
++  if (internal_trans < 0) info = 3;
++  if (identifier != CblasAMatrix && identifier != CblasBMatrix) info = 2;
++  if (order != CblasColMajor && order != CblasRowMajor) info = 1;
++
++  if (info) {
++    BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
++    return;
++  }
++
++  if (gemm_packed_kernels_ready() != 0) {
++    /* The bfloat16 kernels cannot run in this process (see interface/gemm.c,
++     * which skips the computation the same way). Leave no valid header behind,
++     * so that a later cblas_?gemm_compute rejects the buffer instead of
++     * reading stale panels. */
++    memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
++    return;
++  }
++
++  status = GEMM_PACKED_PACK(internal_identifier, internal_trans, internal_m, internal_n, (BLASLONG)k,
++                            alpha, src, (BLASLONG)ld, (void *)dest);
++  if (status != 0) {
++    /* 2: the packed size does not fit, so cblas_?gemm_pack_get_size had
++     * returned 0 for these dimensions; 3: internal layout inconsistency. */
++    info = 0;
++    BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
++  }
++}
+diff --git a/interface/gemm_compute.c b/interface/gemm_compute.c
+new file mode 100644
+index 000000000..2e43db193
+--- /dev/null
++++ b/interface/gemm_compute.c
+@@ -0,0 +1,178 @@
++/*********************************************************************/
++/* Copyright 2026 The OpenBLAS Project                               */
++/* All rights reserved.                                              */
++/*                                                                   */
++/* Redistribution and use in source and binary forms, with or        */
++/* without modification, are permitted provided that the following   */
++/* conditions are met:                                               */
++/*                                                                   */
++/*   1. Redistributions of source code must retain the above         */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer.                                                  */
++/*                                                                   */
++/*   2. Redistributions in binary form must reproduce the above      */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer in the documentation and/or other materials       */
++/*      provided with the distribution.                              */
++/*                                                                   */
++/*    THIS SOFTWARE IS PROVIDED BY THE OPENBLAS PROJECT ``AS IS''    */
++/*    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      */
++/*    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND      */
++/*    FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT   */
++/*    SHALL THE OPENBLAS PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY   */
++/*    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR           */
++/*    CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,          */
++/*    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,      */
++/*    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED     */
++/*    AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT    */
++/*    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)         */
++/*    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF    */
++/*    ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.                     */
++/*********************************************************************/
++
++/*
++ * cblas_?gemm_compute: the last third of the MKL-style packed GEMM API.
++ *
++ *   cblas_?gemm_compute(order, transa, transb, m, n, k,
++ *                       a, lda, b, ldb, beta, c, ldc)
++ *
++ * transa and transb accept the CBLAS_TRANSPOSE values or CblasPacked. A
++ * CblasPacked operand points at a buffer filled by cblas_?gemm_pack with the
++ * same identifier, order, m/n (its own extent), and k; its leading dimension
++ * argument is ignored. The routine computes
++ *
++ *   C := alpha * op(A) * op(B) + beta * C
++ *
++ * where alpha is the product of the alphas recorded in the packed operand(s),
++ * or 1 when neither operand is packed.
++ *
++ * The scratch buffer for the operand that is not packed comes from
++ * blas_memory_alloc, exactly as for a regular GEMM, so concurrent calls from
++ * several threads are safe and may share one read-only packed buffer.
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include "common.h"
++#include "gemm_packed_common.h"
++
++#define ERROR_NAME GEMM_PACKED_PREFIX "_COMPUTE "
++
++void CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, blasint n, blasint k,
++           IFLOAT *a, blasint lda, IFLOAT *b, blasint ldb, FLOAT beta, FLOAT *c, blasint ldc) {
++  blas_arg_t args;
++  blasint info = 0;
++  int a_packed, b_packed, ta, tb;
++  int internal_ta = 0, internal_tb = 0, internal_a_packed = 0, internal_b_packed = 0;
++  int bad_ld8 = 0, bad_ld10 = 0;
++  int row_major;
++  BLASLONG nrowa, nrowb;
++  FLOAT alpha = ONE;
++  XFLOAT *buffer, *sa, *sb;
++  int status;
++
++  PRINT_DEBUG_CNAME;
++
++  a_packed = (transa == CblasPacked);
++  b_packed = (transb == CblasPacked);
++  ta = a_packed ? 0 : gemm_packed_trans_code(transa);
++  tb = b_packed ? 0 : gemm_packed_trans_code(transb);
++
++  args.alpha = (void *)&alpha;
++  args.beta  = (void *)&beta;
++  args.c     = (void *)c;
++  args.ldc   = ldc;
++  args.k     = k;
++
++  row_major = (order == CblasRowMajor);
++
++  if (order == CblasColMajor) {
++    args.m = m;
++    args.n = n;
++    args.a = (void *)a;
++    args.b = (void *)b;
++    args.lda = lda;
++    args.ldb = ldb;
++    internal_ta = ta;
++    internal_tb = tb;
++    internal_a_packed = a_packed;
++    internal_b_packed = b_packed;
++  } else if (row_major) {
++    /* C^T = op(B)^T op(A)^T: the operands change roles, and so do m and n. */
++    args.m = n;
++    args.n = m;
++    args.a = (void *)b;
++    args.b = (void *)a;
++    args.lda = ldb;
++    args.ldb = lda;
++    internal_ta = tb;
++    internal_tb = ta;
++    internal_a_packed = b_packed;
++    internal_b_packed = a_packed;
++  } else {
++    args.m = m;
++    args.n = n;
++    args.a = (void *)a;
++    args.b = (void *)b;
++    args.lda = lda;
++    args.ldb = ldb;
++  }
++
++  /* Leading dimensions are only meaningful for operands that are not packed.
++   * The checks run on the internal operands and are reported against the
++   * user's argument positions: internal lda is the user's ldb (10) in
++   * row-major order and lda (8) otherwise. */
++  nrowa = internal_ta ? (BLASLONG)k : args.m;
++  nrowb = internal_tb ? args.n : (BLASLONG)k;
++  if (!internal_a_packed && args.lda < nrowa) {
++    if (row_major) bad_ld10 = 1; else bad_ld8 = 1;
++  }
++  if (!internal_b_packed && args.ldb < nrowb) {
++    if (row_major) bad_ld8 = 1; else bad_ld10 = 1;
++  }
++
++  /* Later assignments win, so the lowest offending argument is reported. A
++   * NULL operand is only an error when the product reads it. */
++  if (args.ldc < args.m) info = 13;
++  if (bad_ld10) info = 10;
++  if (b == NULL && (b_packed || (k > 0 && n > 0))) info = 9;
++  if (bad_ld8) info = 8;
++  if (a == NULL && (a_packed || (k > 0 && m > 0))) info = 7;
++  if (k < 0) info = 6;
++  if (n < 0) info = 5;
++  if (m < 0) info = 4;
++  if (tb < 0) info = 3;
++  if (ta < 0) info = 2;
++  if (order != CblasColMajor && order != CblasRowMajor) info = 1;
++
++  if (info) {
++    BLASFUNC(xerbla)(ERROR_NAME, &info, sizeof(ERROR_NAME));
++    return;
++  }
++
++  if ((args.m == 0) || (args.n == 0)) return;
++
++  if (gemm_packed_kernels_ready() != 0) return;
++
++  buffer = (XFLOAT *)blas_memory_alloc(0);
++
++#if defined(ARCH_LOONGARCH64) && !defined(NO_AFFINITY)
++  sa = (XFLOAT *)((BLASLONG)buffer + (WhereAmI() & 0xf) * GEMM_OFFSET_A);
++#else
++  sa = (XFLOAT *)((BLASLONG)buffer + GEMM_OFFSET_A);
++#endif
++  sb = (XFLOAT *)(((BLASLONG)sa + ((GEMM_P * GEMM_Q * COMPSIZE * SIZE + GEMM_ALIGN) & ~GEMM_ALIGN)) + GEMM_OFFSET_B);
++
++  status = GEMM_PACKED_COMPUTE(&args, internal_ta, internal_tb, internal_a_packed, internal_b_packed, sa, sb);
++
++  blas_memory_free(buffer);
++
++  if (status != 0) {
++    /* Bit 0: the internal A buffer was rejected, bit 1: the internal B buffer.
++     * Map back to the user's operand positions a (7) and b (9) and report the
++     * lower one, as the argument checks above do. */
++    int user_a_bad = row_major ? (status & 2) : (status & 1);
++    info = user_a_bad ? 7 : 9;
++    BLASFUNC(xerbla)(ERROR_NAME, &info, sizeof(ERROR_NAME));
++  }
++}
+diff --git a/utest/test_extensions/test_sgemm_pack.c b/utest/test_extensions/test_sgemm_pack.c
+new file mode 100644
+index 000000000..6657b0c28
+--- /dev/null
++++ b/utest/test_extensions/test_sgemm_pack.c
+@@ -0,0 +1,802 @@
++/*****************************************************************************
++Copyright (c) 2026, The OpenBLAS Project
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are
++met:
++
++   1. Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++
++   2. Redistributions in binary form must reproduce the above copyright
++      notice, this list of conditions and the following disclaimer in
++      the documentation and/or other materials provided with the
++      distribution.
++   3. Neither the name of the OpenBLAS project nor the names of
++      its contributors may be used to endorse or promote products
++      derived from this software without specific prior written
++      permission.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
++OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
++USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++**********************************************************************************/
++
++#include "utest/openblas_utest.h"
++#include "common.h"
++
++#ifdef BUILD_SINGLE
++#ifndef NO_CBLAS
++
++#define PACK_SENTINEL 0x5A
++#define PACK_SENTINEL_BYTES 16
++
++/* Packed buffers normally come from malloc with a sentinel tail, so that an
++ * overrun by cblas_sgemm_pack is detected. With guard_pages set (Linux only)
++ * they come from mmap and end exactly where a PROT_NONE page begins, so that
++ * any read or write past cblas_sgemm_pack_get_size(), by the copy routines or
++ * by the kernels, faults. */
++static int guard_pages = FALSE;
++
++#if defined(__linux__)
++#include <sys/mman.h>
++#include <unistd.h>
++
++struct guard_map {
++    unsigned char *ptr;
++    void *base;
++    size_t len;
++};
++static struct guard_map guard_maps[2];
++
++static unsigned char *guard_alloc(size_t size)
++{
++    size_t page = (size_t)sysconf(_SC_PAGESIZE);
++    size_t pages = (size + page - 1) / page;
++    void *base = mmap(NULL, (pages + 1) * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++    int slot = guard_maps[0].ptr == NULL ? 0 : 1;
++    if (base == MAP_FAILED) return NULL;
++    mprotect((char *)base + pages * page, page, PROT_NONE);
++    guard_maps[slot].base = base;
++    guard_maps[slot].len = (pages + 1) * page;
++    guard_maps[slot].ptr = (unsigned char *)base + pages * page - size;
++    return guard_maps[slot].ptr;
++}
++
++static void guard_free(unsigned char *ptr)
++{
++    int slot;
++    for (slot = 0; slot < 2; slot++) {
++        if (guard_maps[slot].ptr == ptr) {
++            munmap(guard_maps[slot].base, guard_maps[slot].len);
++            guard_maps[slot].ptr = NULL;
++            return;
++        }
++    }
++}
++#endif
++
++static unsigned char *alloc_packed(size_t size)
++{
++    unsigned char *buffer;
++    if (size == 0) return NULL;
++#if defined(__linux__)
++    if (guard_pages) return guard_alloc(size);
++#endif
++    buffer = (unsigned char *)malloc(size + PACK_SENTINEL_BYTES);
++    if (buffer != NULL) memset(buffer + size, PACK_SENTINEL, PACK_SENTINEL_BYTES);
++    return buffer;
++}
++
++static void free_packed(unsigned char *buffer)
++{
++    if (buffer == NULL) return;
++#if defined(__linux__)
++    if (guard_pages) {
++        guard_free(buffer);
++        return;
++    }
++#endif
++    free(buffer);
++}
++
++static int sentinel_intact(const unsigned char *buffer, size_t size)
++{
++    size_t i;
++    if (guard_pages) return TRUE;
++    for (i = 0; i < PACK_SENTINEL_BYTES; i++)
++        if (buffer[size + i] != PACK_SENTINEL) return FALSE;
++    return TRUE;
++}
++
++/**
++ * Compute the reference with cblas_sgemm, pack the requested operands with
++ * cblas_sgemm_pack, run cblas_sgemm_compute, and return the largest absolute
++ * difference divided by (1 + largest reference magnitude).
++ *
++ * When only one operand is packed it records alpha. When both are packed, A
++ * records alpha and B records 3, so that the product of the two recorded
++ * values, which cblas_sgemm_compute applies, differs from either of them.
++ *
++ * param order specifies row or column major order
++ * param transa specifies op(A), the transposition operation applied to A
++ * param transb specifies op(B), the transposition operation applied to B
++ * param m - number of rows of op(A) and C
++ * param n - number of columns of op(B) and C
++ * param k - number of columns of op(A) and rows of op(B)
++ * param alpha - scaling factor recorded by the pack (see above)
++ * param beta - scaling factor for matrix C
++ * param pack_a - non-zero to pack A
++ * param pack_b - non-zero to pack B
++ * param pad - extra elements added to every leading dimension
++ * return scaled largest difference, or a huge value when a buffer was overrun
++ */
++static float check_sgemm_pack(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE transa,
++                              enum CBLAS_TRANSPOSE transb, blasint m, blasint n, blasint k,
++                              float alpha, float beta, int pack_a, int pack_b, blasint pad)
++{
++    int row_major = (order == CblasRowMajor);
++    blasint a_rows = (transa == CblasNoTrans) ? m : k;
++    blasint a_cols = (transa == CblasNoTrans) ? k : m;
++    blasint b_rows = (transb == CblasNoTrans) ? k : n;
++    blasint b_cols = (transb == CblasNoTrans) ? n : k;
++    blasint lda = (row_major ? a_cols : a_rows) + pad;
++    blasint ldb = (row_major ? b_cols : b_rows) + pad;
++    blasint ldc = (row_major ? n : m) + pad;
++    size_t a_size = (size_t)(row_major ? a_rows : a_cols) * (size_t)lda;
++    size_t b_size = (size_t)(row_major ? b_rows : b_cols) * (size_t)ldb;
++    size_t c_size = (size_t)(row_major ? m : n) * (size_t)ldc;
++    float *a = (float *)malloc((a_size + 1) * sizeof(float));
++    float *b = (float *)malloc((b_size + 1) * sizeof(float));
++    float *c_ref = (float *)malloc((c_size + 1) * sizeof(float));
++    float *c_test = (float *)malloc((c_size + 1) * sizeof(float));
++    unsigned char *packed_a = NULL, *packed_b = NULL;
++    size_t size_a = 0, size_b = 0;
++    float alpha_a = pack_a ? alpha : 1.0f;
++    float alpha_b = pack_b ? (pack_a ? 3.0f : alpha) : 1.0f;
++    float ref_alpha = alpha_a * alpha_b;
++    float max_diff = 0.0f, max_ref = 0.0f;
++    size_t i;
++
++    srand_generate(a, (blasint)a_size);
++    srand_generate(b, (blasint)b_size);
++    srand_generate(c_ref, (blasint)c_size);
++    for (i = 0; i < c_size; i++) c_test[i] = c_ref[i];
++
++    cblas_sgemm(order, transa, transb, m, n, k, ref_alpha, a, lda, b, ldb, beta, c_ref, ldc);
++
++    if (pack_a) {
++        size_a = cblas_sgemm_pack_get_size(CblasAMatrix, m, n, k);
++        packed_a = alloc_packed(size_a);
++        cblas_sgemm_pack(order, CblasAMatrix, transa, m, n, k, alpha_a, a, lda, (float *)packed_a);
++    }
++    if (pack_b) {
++        size_b = cblas_sgemm_pack_get_size(CblasBMatrix, m, n, k);
++        packed_b = alloc_packed(size_b);
++        cblas_sgemm_pack(order, CblasBMatrix, transb, m, n, k, alpha_b, b, ldb, (float *)packed_b);
++    }
++
++    cblas_sgemm_compute(order, pack_a ? (blasint)CblasPacked : (blasint)transa,
++                        pack_b ? (blasint)CblasPacked : (blasint)transb, m, n, k,
++                        pack_a ? (float *)packed_a : a, lda,
++                        pack_b ? (float *)packed_b : b, ldb, beta, c_test, ldc);
++
++    for (i = 0; i < c_size; i++) {
++        float diff = fabsf(c_test[i] - c_ref[i]);
++        if (diff > max_diff) max_diff = diff;
++        if (fabsf(c_ref[i]) > max_ref) max_ref = fabsf(c_ref[i]);
++    }
++
++    if ((pack_a && !sentinel_intact(packed_a, size_a)) ||
++        (pack_b && !sentinel_intact(packed_b, size_b)))
++        max_diff = 1.0e30f;
++
++    free(a);
++    free(b);
++    free(c_ref);
++    free(c_test);
++    free_packed(packed_a);
++    free_packed(packed_b);
++
++    return max_diff / (1.0f + max_ref);
++}
++
++/* Fills a 4 x 4 x 4 column-major problem with ones and c with 7, and packs A
++ * and B so that the header rejection tests below can pass them in the wrong
++ * place. Both packed buffers are valid for (m, n, k) = (4, 4, 4). */
++struct sgemm_pack_fixture {
++    float a[16];
++    float b[16];
++    float c[16];
++    float *packed_a;
++    float *packed_b;
++};
++
++static void sgemm_pack_fixture_init(struct sgemm_pack_fixture *f)
++{
++    int i;
++    for (i = 0; i < 16; i++) {
++        f->a[i] = 1.0f;
++        f->b[i] = 1.0f;
++        f->c[i] = 7.0f;
++    }
++    f->packed_a = (float *)malloc(cblas_sgemm_pack_get_size(CblasAMatrix, 4, 4, 4));
++    f->packed_b = (float *)malloc(cblas_sgemm_pack_get_size(CblasBMatrix, 4, 4, 4));
++    cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0f, f->a, 4, f->packed_a);
++    cblas_sgemm_pack(CblasColMajor, CblasBMatrix, CblasNoTrans, 4, 4, 4, 1.0f, f->b, 4, f->packed_b);
++}
++
++static void sgemm_pack_fixture_free(struct sgemm_pack_fixture *f)
++{
++    free(f->packed_a);
++    free(f->packed_b);
++}
++
++static int c_untouched(const float *c)
++{
++    int i;
++    for (i = 0; i < 16; i++)
++        if (c[i] != 7.0f) return FALSE;
++    return TRUE;
++}
++
++CTEST(sgemm_pack, get_size_is_positive)
++{
++    ASSERT_TRUE(cblas_sgemm_pack_get_size(CblasAMatrix, 7, 9, 11) > 0);
++    ASSERT_TRUE(cblas_sgemm_pack_get_size(CblasBMatrix, 7, 9, 11) > 0);
++    ASSERT_TRUE(cblas_sgemm_pack_get_size(CblasAMatrix, 0, 0, 0) > 0);
++}
++
++CTEST(sgemm_pack, rowmajor_pack_b_notrans_notrans)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 50, 70, 30,
++                                 1.5f, 2.0f, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sgemm_pack, rowmajor_pack_a_trans_notrans)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasTrans, CblasNoTrans, 50, 70, 30,
++                                 0.5f, 0.0f, TRUE, FALSE, 3);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sgemm_pack, rowmajor_pack_both_trans_trans)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasTrans, CblasTrans, 33, 65, 17,
++                                 2.0f, 1.0f, TRUE, TRUE, 1);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sgemm_pack, colmajor_pack_b_notrans_trans)
++{
++    float err = check_sgemm_pack(CblasColMajor, CblasNoTrans, CblasTrans, 50, 70, 30,
++                                 1.5f, 2.0f, FALSE, TRUE, 2);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sgemm_pack, colmajor_pack_a_notrans_notrans)
++{
++    float err = check_sgemm_pack(CblasColMajor, CblasNoTrans, CblasNoTrans, 50, 70, 30,
++                                 1.5f, 0.0f, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sgemm_pack, colmajor_pack_both_trans_notrans)
++{
++    float err = check_sgemm_pack(CblasColMajor, CblasTrans, CblasNoTrans, 33, 65, 17,
++                                 0.75f, 1.0f, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sgemm_pack, pack_none_matches_gemm_with_alpha_one)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasNoTrans, CblasTrans, 40, 20, 60,
++                                 1.0f, 0.5f, FALSE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sgemm_pack, rowmajor_pack_both_k_1)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 33, 17, 1,
++                                 1.0f, 0.0f, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* k = 1000 exceeds GEMM_Q on every core, so the K loop takes at least two
++ * blocks and passes through the halving of the last block. */
++CTEST(sgemm_pack, rowmajor_pack_b_large_k)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 33, 65, 1000,
++                                 1.0f, 0.0f, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* n = 1700 makes the row-major B, the inner operand, span several GEMM_P blocks. */
++CTEST(sgemm_pack, rowmajor_pack_b_large_n)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasNoTrans, CblasTrans, 40, 1700, 300,
++                                 1.0f, 0.0f, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* m = 1700 makes the column-major A, the inner operand, span several GEMM_P blocks. */
++CTEST(sgemm_pack, colmajor_pack_a_large_m)
++{
++    float err = check_sgemm_pack(CblasColMajor, CblasTrans, CblasNoTrans, 1700, 40, 300,
++                                 1.0f, 1.0f, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* The row-major A is the outer operand. m = 9000 stays inside one GEMM_R panel
++ * on every x86-64 core with the default BUFFER_SIZE, so this covers a long
++ * single panel; the next test crosses the panel boundary. */
++CTEST(sgemm_pack, rowmajor_pack_a_large_m)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 9000, 8, 64,
++                                 1.0f, 0.0f, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* GEMM_R derives from BUFFER_SIZE and is about 65000 for sgemm with the default
++ * 128 MB buffer, so m = 70000 makes the packed outer operand span two GEMM_R
++ * panels in row-major order, and the packed B does the same in column-major
++ * order. */
++CTEST(sgemm_pack, pack_outer_operand_crosses_gemm_r)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 70000, 8, 16,
++                                 1.0f, 0.0f, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++    err = check_sgemm_pack(CblasColMajor, CblasNoTrans, CblasTrans, 8, 70000, 16,
++                           1.0f, 0.5f, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sgemm_pack, rowmajor_pack_both_large)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 1700, 1700, 300,
++                                 1.0f, 0.0f, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sgemm_pack, zero_k_scales_c_by_beta)
++{
++    float err = check_sgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 5, 6, 0,
++                                 1.0f, 0.5f, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* The packed layout of B does not depend on m, so one packed B serves
++ * products with any number of rows. */
++CTEST(sgemm_pack, rowmajor_packed_b_reused_for_other_m)
++{
++    blasint n = 24, k = 40;
++    blasint pack_m = 8, sizes[3] = {1, 3, 40};
++    size_t size = cblas_sgemm_pack_get_size(CblasBMatrix, pack_m, n, k);
++    float *b = (float *)malloc((size_t)k * n * sizeof(float));
++    unsigned char *packed_b = alloc_packed(size);
++    int s;
++
++    srand_generate(b, k * n);
++    cblas_sgemm_pack(CblasRowMajor, CblasBMatrix, CblasNoTrans, pack_m, n, k, 1.0f, b, n,
++                     (float *)packed_b);
++    ASSERT_TRUE(sentinel_intact(packed_b, size));
++
++    for (s = 0; s < 3; s++) {
++        blasint m = sizes[s];
++        float *a = (float *)malloc((size_t)m * k * sizeof(float));
++        float *c_ref = (float *)malloc((size_t)m * n * sizeof(float));
++        float *c_test = (float *)malloc((size_t)m * n * sizeof(float));
++        float max_diff = 0.0f;
++        blasint i;
++
++        srand_generate(a, m * k);
++        for (i = 0; i < m * n; i++) c_ref[i] = c_test[i] = 0.0f;
++
++        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, 1.0f, a, k, b, n, 0.0f,
++                    c_ref, n);
++        cblas_sgemm_compute(CblasRowMajor, CblasNoTrans, CblasPacked, m, n, k, a, k,
++                            (float *)packed_b, n, 0.0f, c_test, n);
++
++        for (i = 0; i < m * n; i++)
++            if (fabsf(c_test[i] - c_ref[i]) > max_diff) max_diff = fabsf(c_test[i] - c_ref[i]);
++        ASSERT_DBL_NEAR_TOL(0.0f, max_diff, SINGLE_EPS);
++
++        free(a);
++        free(c_ref);
++        free(c_test);
++    }
++
++    free(b);
++    free_packed(packed_b);
++}
++
++/* The closed-form size that cblas_sgemm_pack_get_size computes must agree with
++ * the panels the pack writes for every tail regime of the M, N, and K blocking:
++ * a disagreement makes cblas_sgemm_pack reject the call and leaves the header
++ * unwritten, which the compute then rejects, so the product would not match.
++ * Column-major A is the inner operand (GEMM_P blocks), row-major A the outer
++ * one (GEMM_R blocks); k sweeps the GEMM_Q blocks including the halved tail. */
++CTEST(sgemm_pack, size_matches_layout_for_every_tail)
++{
++    blasint m, k;
++    float err;
++
++    for (m = 1; m <= 1400; m++) {
++        err = check_sgemm_pack(CblasColMajor, CblasNoTrans, CblasNoTrans, m, 2, 3, 1.0f, 0.0f, TRUE, FALSE, 0);
++        ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++        err = check_sgemm_pack(CblasRowMajor, CblasTrans, CblasNoTrans, m, 2, 3, 1.0f, 0.0f, TRUE, FALSE, 0);
++        ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++    }
++    for (k = 1; k <= 2200; k++) {
++        err = check_sgemm_pack(CblasColMajor, CblasNoTrans, CblasTrans, 3, 5, k, 1.0f, 0.0f, TRUE, TRUE, 0);
++        ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++    }
++}
++
++#if defined(__linux__)
++/* Every packed buffer ends exactly at a PROT_NONE page, so a copy routine or a
++ * kernel that reads or writes past cblas_sgemm_pack_get_size() faults instead
++ * of silently touching neighbouring memory. */
++CTEST(sgemm_pack, kernels_stay_inside_get_size)
++{
++    static const blasint ms[] = {1, 2, 3, 5, 7, 8, 13, 16, 17, 31, 32, 33, 64, 65, 127, 129, 300};
++    static const blasint ns[] = {1, 16, 33, 300};
++    static const blasint ks[] = {1, 3, 17, 129, 1000};
++    size_t mi, ni, ki;
++    int order, ta, tb, mode;
++
++    guard_pages = TRUE;
++    for (mi = 0; mi < sizeof(ms) / sizeof(ms[0]); mi++)
++    for (ni = 0; ni < sizeof(ns) / sizeof(ns[0]); ni++)
++    for (ki = 0; ki < sizeof(ks) / sizeof(ks[0]); ki++)
++    for (order = 0; order < 2; order++)
++    for (ta = 0; ta < 2; ta++)
++    for (tb = 0; tb < 2; tb++)
++    for (mode = 0; mode < 3; mode++) {
++        float err = check_sgemm_pack(order ? CblasColMajor : CblasRowMajor,
++                                     ta ? CblasTrans : CblasNoTrans, tb ? CblasTrans : CblasNoTrans,
++                                     ms[mi], ns[ni], ks[ki], 1.0f, 0.0f,
++                                     mode != 1, mode != 0, 0);
++        if (err > SINGLE_EPS) {
++            guard_pages = FALSE;
++            ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++        }
++    }
++    guard_pages = FALSE;
++}
++#endif
++
++/* The header is read and written with memcpy, so a buffer that is only
++ * aligned for its element type is accepted. */
++CTEST(sgemm_pack, buffer_needs_only_element_alignment)
++{
++    size_t size = cblas_sgemm_pack_get_size(CblasBMatrix, 6, 10, 12);
++    float *storage = (float *)malloc(size + 64);
++    float *packed_b = storage + 1;
++    float a[6 * 12], b[12 * 10], c_ref[6 * 10], c_test[6 * 10];
++    float max_diff = 0.0f;
++    int i;
++
++    srand_generate(a, 6 * 12);
++    srand_generate(b, 12 * 10);
++    for (i = 0; i < 60; i++) c_ref[i] = c_test[i] = 0.0f;
++
++    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, 6, 10, 12, 1.0f, a, 12, b, 10, 0.0f,
++                c_ref, 10);
++    cblas_sgemm_pack(CblasRowMajor, CblasBMatrix, CblasNoTrans, 6, 10, 12, 1.0f, b, 10, packed_b);
++    cblas_sgemm_compute(CblasRowMajor, CblasNoTrans, CblasPacked, 6, 10, 12, a, 12, packed_b, 10,
++                        0.0f, c_test, 10);
++
++    for (i = 0; i < 60; i++)
++        if (fabsf(c_test[i] - c_ref[i]) > max_diff) max_diff = fabsf(c_test[i] - c_ref[i]);
++    ASSERT_DBL_NEAR_TOL(0.0f, max_diff, SINGLE_EPS);
++
++    free(storage);
++}
++
++CTEST(sgemm_pack, xerbla_get_size_negative_k)
++{
++    set_xerbla("SGEMM_PACK_GET_SIZE ", 4);
++    ASSERT_TRUE(cblas_sgemm_pack_get_size(CblasAMatrix, 2, 2, -1) == 0);
++    ASSERT_TRUE(check_error());
++}
++
++/* Dimensions whose packed size does not fit are reported as parameter 0 and
++ * answered with 0, quickly: the size is computed in closed form. */
++CTEST(sgemm_pack, xerbla_get_size_overflow)
++{
++    blasint huge = (blasint)(((blasint)1 << (sizeof(blasint) * 8 - 2)) - 1) * 2 + 1;
++    float a[1];
++    float dest[64];
++
++    set_xerbla("SGEMM_PACK_GET_SIZE ", 0);
++    ASSERT_TRUE(cblas_sgemm_pack_get_size(CblasAMatrix, huge, 1, huge) == 0);
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("SGEMM_PACK ", 0);
++    cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, huge, 1, huge, 1.0f, a, huge, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(sgemm_pack, xerbla_pack_src_null)
++{
++    float dest[64];
++
++    set_xerbla("SGEMM_PACK ", 8);
++    cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 2, 2, 2, 1.0f, NULL, 2, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(sgemm_pack, xerbla_compute_operand_null)
++{
++    float a[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float b[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float c[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, NULL, 2, b, 2, 0.0f, c, 2);
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("SGEMM_COMPUTE ", 9);
++    cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, a, 2, NULL, 2, 0.0f, c, 2);
++    ASSERT_TRUE(check_error());
++}
++
++/* A header whose data offset disagrees with the buffer address is rejected;
++ * this also catches a packed buffer copied to a differently aligned address. */
++CTEST(sgemm_pack, xerbla_compute_rejects_shifted_data_offset)
++{
++    struct sgemm_pack_fixture f;
++    size_t size = cblas_sgemm_pack_get_size(CblasAMatrix, 4, 4, 4);
++    unsigned char *copy = (unsigned char *)malloc(size + 64);
++    unsigned char *shifted;
++    int i;
++
++    sgemm_pack_fixture_init(&f);
++    /* Move the bytes to an address with a different alignment modulo 64. */
++    shifted = copy;
++    while ((uintptr_t)shifted % 64 == (uintptr_t)f.packed_a % 64) shifted += 16;
++    memcpy(shifted, f.packed_a, size);
++
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 4, (float *)shifted, 4, f.b, 4,
++                        0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    for (i = 0; i < 16; i++) ASSERT_DBL_NEAR_TOL(7.0f, f.c[i], SINGLE_EPS);
++
++    free(copy);
++    sgemm_pack_fixture_free(&f);
++}
++
++CTEST(sgemm_pack, xerbla_pack_identifier_invalid)
++{
++    float a[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float dest[64];
++
++    set_xerbla("SGEMM_PACK ", 2);
++    cblas_sgemm_pack(CblasColMajor, (enum CBLAS_IDENTIFIER)INVALID, CblasNoTrans, 2, 2, 2, 1.0f,
++                     a, 2, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(sgemm_pack, xerbla_pack_trans_packed_invalid)
++{
++    float a[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float dest[64];
++
++    set_xerbla("SGEMM_PACK ", 3);
++    cblas_sgemm_pack(CblasColMajor, CblasAMatrix, (enum CBLAS_TRANSPOSE)CblasPacked, 2, 2, 2, 1.0f,
++                     a, 2, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(sgemm_pack, xerbla_pack_ld_invalid)
++{
++    float a[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float dest[64];
++
++    set_xerbla("SGEMM_PACK ", 9);
++    cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 2, 2, 2, 1.0f, a, 1, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(sgemm_pack, xerbla_compute_transa_invalid)
++{
++    float a[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float b[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float c[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++
++    set_xerbla("SGEMM_COMPUTE ", 2);
++    cblas_sgemm_compute(CblasColMajor, INVALID, CblasNoTrans, 2, 2, 2, a, 2, b, 2, 0.0f, c, 2);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(sgemm_pack, xerbla_compute_ldc_invalid)
++{
++    float a[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float b[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float c[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++
++    set_xerbla("SGEMM_COMPUTE ", 13);
++    cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, a, 2, b, 2, 0.0f, c, 1);
++    ASSERT_TRUE(check_error());
++}
++
++/* A packed buffer made for another k is rejected before C is touched, and the
++ * offending operand is reported at the user's argument position in both
++ * storage orders. */
++CTEST(sgemm_pack, xerbla_compute_rejects_mismatched_k)
++{
++    struct sgemm_pack_fixture f;
++    float b5[20], a5[20];
++    int i;
++
++    sgemm_pack_fixture_init(&f);
++    for (i = 0; i < 20; i++) a5[i] = b5[i] = 1.0f;
++
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 5, f.packed_a, 4, b5, 5,
++                        0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    set_xerbla("SGEMM_COMPUTE ", 9);
++    cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 5, a5, 4, f.packed_b, 4,
++                        0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    /* In row-major order the user's B is the driver's A and vice versa; the
++     * buffers below were packed row-major so that the identifiers match. */
++    cblas_sgemm_pack(CblasRowMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0f, f.a, 4, f.packed_a);
++    cblas_sgemm_pack(CblasRowMajor, CblasBMatrix, CblasNoTrans, 4, 4, 4, 1.0f, f.b, 4, f.packed_b);
++
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasRowMajor, CblasPacked, CblasNoTrans, 4, 4, 5, f.packed_a, 4, b5, 4,
++                        0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    set_xerbla("SGEMM_COMPUTE ", 9);
++    cblas_sgemm_compute(CblasRowMajor, CblasNoTrans, CblasPacked, 4, 4, 5, a5, 5, f.packed_b, 4,
++                        0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    sgemm_pack_fixture_free(&f);
++}
++
++/* A buffer packed as A is not accepted in the B position, and vice versa. */
++CTEST(sgemm_pack, xerbla_compute_rejects_swapped_identifier)
++{
++    struct sgemm_pack_fixture f;
++
++    sgemm_pack_fixture_init(&f);
++
++    set_xerbla("SGEMM_COMPUTE ", 9);
++    cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 4, f.a, 4, f.packed_a, 4,
++                        0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 4, f.packed_b, 4, f.b, 4,
++                        0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    sgemm_pack_fixture_free(&f);
++}
++
++/* The extent of the packed operand itself must match; the other extent may
++ * differ (see rowmajor_packed_b_reused_for_other_m). */
++CTEST(sgemm_pack, xerbla_compute_rejects_mismatched_own_extent)
++{
++    struct sgemm_pack_fixture f;
++    float b_wide[4 * 5];
++    float c_wide[4 * 5];
++    int i;
++
++    sgemm_pack_fixture_init(&f);
++    for (i = 0; i < 20; i++) {
++        b_wide[i] = 1.0f;
++        c_wide[i] = 7.0f;
++    }
++
++    /* Packed A is 4 x 4; asking for m = 5 rows of op(A) must fail. */
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 5, 4, 4, f.packed_a, 5, f.b, 4,
++                        0.0f, c_wide, 5);
++    ASSERT_TRUE(check_error());
++    for (i = 0; i < 20; i++) ASSERT_DBL_NEAR_TOL(7.0f, c_wide[i], SINGLE_EPS);
++
++    /* Packed B has 4 columns; asking for n = 5 must fail, while a different m
++     * with the same packed B is fine. */
++    set_xerbla("SGEMM_COMPUTE ", 9);
++    cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 5, 4, f.a, 4, f.packed_b, 4,
++                        0.0f, c_wide, 4);
++    ASSERT_TRUE(check_error());
++    for (i = 0; i < 20; i++) ASSERT_DBL_NEAR_TOL(7.0f, c_wide[i], SINGLE_EPS);
++
++    (void)b_wide;
++    sgemm_pack_fixture_free(&f);
++}
++
++/* A zero-filled buffer has no valid header. */
++CTEST(sgemm_pack, xerbla_compute_rejects_zeroed_buffer)
++{
++    struct sgemm_pack_fixture f;
++    size_t size = cblas_sgemm_pack_get_size(CblasAMatrix, 4, 4, 4);
++    float *zeroed = (float *)calloc(size, 1);
++
++    sgemm_pack_fixture_init(&f);
++
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 4, zeroed, 4, f.b, 4, 0.0f,
++                        f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    free(zeroed);
++    sgemm_pack_fixture_free(&f);
++}
++
++/* When both packed operands are unusable, the lower argument (a, 7) is
++ * reported in both storage orders. */
++CTEST(sgemm_pack, xerbla_compute_reports_a_when_both_invalid)
++{
++    struct sgemm_pack_fixture f;
++
++    sgemm_pack_fixture_init(&f);
++
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasColMajor, CblasPacked, CblasPacked, 4, 4, 5, f.packed_a, 4,
++                        f.packed_b, 4, 0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasRowMajor, CblasPacked, CblasPacked, 4, 4, 5, f.packed_a, 4,
++                        f.packed_b, 4, 0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    sgemm_pack_fixture_free(&f);
++}
++
++#ifdef BUILD_DOUBLE
++/* A buffer packed by cblas_dgemm_pack is not accepted by cblas_sgemm_compute. */
++CTEST(sgemm_pack, xerbla_compute_rejects_foreign_pack)
++{
++    struct sgemm_pack_fixture f;
++    double a[16];
++    double *foreign = (double *)malloc(cblas_dgemm_pack_get_size(CblasAMatrix, 4, 4, 4));
++    int i;
++
++    sgemm_pack_fixture_init(&f);
++    for (i = 0; i < 16; i++) a[i] = 1.0;
++    cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0, a, 4, foreign);
++
++    set_xerbla("SGEMM_COMPUTE ", 7);
++    cblas_sgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 4, (float *)foreign, 4, f.b,
++                        4, 0.0f, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    free(foreign);
++    sgemm_pack_fixture_free(&f);
++}
++#endif
++
++#endif /* NO_CBLAS */
++#endif /* BUILD_SINGLE */
+diff --git a/utest/test_extensions/test_dgemm_pack.c b/utest/test_extensions/test_dgemm_pack.c
+new file mode 100644
+index 000000000..a5b835798
+--- /dev/null
++++ b/utest/test_extensions/test_dgemm_pack.c
+@@ -0,0 +1,802 @@
++/*****************************************************************************
++Copyright (c) 2026, The OpenBLAS Project
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are
++met:
++
++   1. Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++
++   2. Redistributions in binary form must reproduce the above copyright
++      notice, this list of conditions and the following disclaimer in
++      the documentation and/or other materials provided with the
++      distribution.
++   3. Neither the name of the OpenBLAS project nor the names of
++      its contributors may be used to endorse or promote products
++      derived from this software without specific prior written
++      permission.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
++OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
++USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++**********************************************************************************/
++
++#include "utest/openblas_utest.h"
++#include "common.h"
++
++#ifdef BUILD_DOUBLE
++#ifndef NO_CBLAS
++
++#define PACK_SENTINEL 0x5A
++#define PACK_SENTINEL_BYTES 16
++
++/* Packed buffers normally come from malloc with a sentinel tail, so that an
++ * overrun by cblas_dgemm_pack is detected. With guard_pages set (Linux only)
++ * they come from mmap and end exactly where a PROT_NONE page begins, so that
++ * any read or write past cblas_dgemm_pack_get_size(), by the copy routines or
++ * by the kernels, faults. */
++static int guard_pages = FALSE;
++
++#if defined(__linux__)
++#include <sys/mman.h>
++#include <unistd.h>
++
++struct guard_map {
++    unsigned char *ptr;
++    void *base;
++    size_t len;
++};
++static struct guard_map guard_maps[2];
++
++static unsigned char *guard_alloc(size_t size)
++{
++    size_t page = (size_t)sysconf(_SC_PAGESIZE);
++    size_t pages = (size + page - 1) / page;
++    void *base = mmap(NULL, (pages + 1) * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++    int slot = guard_maps[0].ptr == NULL ? 0 : 1;
++    if (base == MAP_FAILED) return NULL;
++    mprotect((char *)base + pages * page, page, PROT_NONE);
++    guard_maps[slot].base = base;
++    guard_maps[slot].len = (pages + 1) * page;
++    guard_maps[slot].ptr = (unsigned char *)base + pages * page - size;
++    return guard_maps[slot].ptr;
++}
++
++static void guard_free(unsigned char *ptr)
++{
++    int slot;
++    for (slot = 0; slot < 2; slot++) {
++        if (guard_maps[slot].ptr == ptr) {
++            munmap(guard_maps[slot].base, guard_maps[slot].len);
++            guard_maps[slot].ptr = NULL;
++            return;
++        }
++    }
++}
++#endif
++
++static unsigned char *alloc_packed(size_t size)
++{
++    unsigned char *buffer;
++    if (size == 0) return NULL;
++#if defined(__linux__)
++    if (guard_pages) return guard_alloc(size);
++#endif
++    buffer = (unsigned char *)malloc(size + PACK_SENTINEL_BYTES);
++    if (buffer != NULL) memset(buffer + size, PACK_SENTINEL, PACK_SENTINEL_BYTES);
++    return buffer;
++}
++
++static void free_packed(unsigned char *buffer)
++{
++    if (buffer == NULL) return;
++#if defined(__linux__)
++    if (guard_pages) {
++        guard_free(buffer);
++        return;
++    }
++#endif
++    free(buffer);
++}
++
++static int sentinel_intact(const unsigned char *buffer, size_t size)
++{
++    size_t i;
++    if (guard_pages) return TRUE;
++    for (i = 0; i < PACK_SENTINEL_BYTES; i++)
++        if (buffer[size + i] != PACK_SENTINEL) return FALSE;
++    return TRUE;
++}
++
++/**
++ * Compute the reference with cblas_dgemm, pack the requested operands with
++ * cblas_dgemm_pack, run cblas_dgemm_compute, and return the largest absolute
++ * difference divided by (1 + largest reference magnitude).
++ *
++ * When only one operand is packed it records alpha. When both are packed, A
++ * records alpha and B records 3, so that the product of the two recorded
++ * values, which cblas_dgemm_compute applies, differs from either of them.
++ *
++ * param order specifies row or column major order
++ * param transa specifies op(A), the transposition operation applied to A
++ * param transb specifies op(B), the transposition operation applied to B
++ * param m - number of rows of op(A) and C
++ * param n - number of columns of op(B) and C
++ * param k - number of columns of op(A) and rows of op(B)
++ * param alpha - scaling factor recorded by the pack (see above)
++ * param beta - scaling factor for matrix C
++ * param pack_a - non-zero to pack A
++ * param pack_b - non-zero to pack B
++ * param pad - extra elements added to every leading dimension
++ * return scaled largest difference, or a huge value when a buffer was overrun
++ */
++static double check_dgemm_pack(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE transa,
++                              enum CBLAS_TRANSPOSE transb, blasint m, blasint n, blasint k,
++                              double alpha, double beta, int pack_a, int pack_b, blasint pad)
++{
++    int row_major = (order == CblasRowMajor);
++    blasint a_rows = (transa == CblasNoTrans) ? m : k;
++    blasint a_cols = (transa == CblasNoTrans) ? k : m;
++    blasint b_rows = (transb == CblasNoTrans) ? k : n;
++    blasint b_cols = (transb == CblasNoTrans) ? n : k;
++    blasint lda = (row_major ? a_cols : a_rows) + pad;
++    blasint ldb = (row_major ? b_cols : b_rows) + pad;
++    blasint ldc = (row_major ? n : m) + pad;
++    size_t a_size = (size_t)(row_major ? a_rows : a_cols) * (size_t)lda;
++    size_t b_size = (size_t)(row_major ? b_rows : b_cols) * (size_t)ldb;
++    size_t c_size = (size_t)(row_major ? m : n) * (size_t)ldc;
++    double *a = (double *)malloc((a_size + 1) * sizeof(double));
++    double *b = (double *)malloc((b_size + 1) * sizeof(double));
++    double *c_ref = (double *)malloc((c_size + 1) * sizeof(double));
++    double *c_test = (double *)malloc((c_size + 1) * sizeof(double));
++    unsigned char *packed_a = NULL, *packed_b = NULL;
++    size_t size_a = 0, size_b = 0;
++    double alpha_a = pack_a ? alpha : 1.0;
++    double alpha_b = pack_b ? (pack_a ? 3.0 : alpha) : 1.0;
++    double ref_alpha = alpha_a * alpha_b;
++    double max_diff = 0.0, max_ref = 0.0;
++    size_t i;
++
++    drand_generate(a, (blasint)a_size);
++    drand_generate(b, (blasint)b_size);
++    drand_generate(c_ref, (blasint)c_size);
++    for (i = 0; i < c_size; i++) c_test[i] = c_ref[i];
++
++    cblas_dgemm(order, transa, transb, m, n, k, ref_alpha, a, lda, b, ldb, beta, c_ref, ldc);
++
++    if (pack_a) {
++        size_a = cblas_dgemm_pack_get_size(CblasAMatrix, m, n, k);
++        packed_a = alloc_packed(size_a);
++        cblas_dgemm_pack(order, CblasAMatrix, transa, m, n, k, alpha_a, a, lda, (double *)packed_a);
++    }
++    if (pack_b) {
++        size_b = cblas_dgemm_pack_get_size(CblasBMatrix, m, n, k);
++        packed_b = alloc_packed(size_b);
++        cblas_dgemm_pack(order, CblasBMatrix, transb, m, n, k, alpha_b, b, ldb, (double *)packed_b);
++    }
++
++    cblas_dgemm_compute(order, pack_a ? (blasint)CblasPacked : (blasint)transa,
++                        pack_b ? (blasint)CblasPacked : (blasint)transb, m, n, k,
++                        pack_a ? (double *)packed_a : a, lda,
++                        pack_b ? (double *)packed_b : b, ldb, beta, c_test, ldc);
++
++    for (i = 0; i < c_size; i++) {
++        double diff = fabs(c_test[i] - c_ref[i]);
++        if (diff > max_diff) max_diff = diff;
++        if (fabs(c_ref[i]) > max_ref) max_ref = fabs(c_ref[i]);
++    }
++
++    if ((pack_a && !sentinel_intact(packed_a, size_a)) ||
++        (pack_b && !sentinel_intact(packed_b, size_b)))
++        max_diff = 1.0e30f;
++
++    free(a);
++    free(b);
++    free(c_ref);
++    free(c_test);
++    free_packed(packed_a);
++    free_packed(packed_b);
++
++    return max_diff / (1.0 + max_ref);
++}
++
++/* Fills a 4 x 4 x 4 column-major problem with ones and c with 7, and packs A
++ * and B so that the header rejection tests below can pass them in the wrong
++ * place. Both packed buffers are valid for (m, n, k) = (4, 4, 4). */
++struct dgemm_pack_fixture {
++    double a[16];
++    double b[16];
++    double c[16];
++    double *packed_a;
++    double *packed_b;
++};
++
++static void dgemm_pack_fixture_init(struct dgemm_pack_fixture *f)
++{
++    int i;
++    for (i = 0; i < 16; i++) {
++        f->a[i] = 1.0;
++        f->b[i] = 1.0;
++        f->c[i] = 7.0;
++    }
++    f->packed_a = (double *)malloc(cblas_dgemm_pack_get_size(CblasAMatrix, 4, 4, 4));
++    f->packed_b = (double *)malloc(cblas_dgemm_pack_get_size(CblasBMatrix, 4, 4, 4));
++    cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0, f->a, 4, f->packed_a);
++    cblas_dgemm_pack(CblasColMajor, CblasBMatrix, CblasNoTrans, 4, 4, 4, 1.0, f->b, 4, f->packed_b);
++}
++
++static void dgemm_pack_fixture_free(struct dgemm_pack_fixture *f)
++{
++    free(f->packed_a);
++    free(f->packed_b);
++}
++
++static int c_untouched(const double *c)
++{
++    int i;
++    for (i = 0; i < 16; i++)
++        if (c[i] != 7.0) return FALSE;
++    return TRUE;
++}
++
++CTEST(dgemm_pack, get_size_is_positive)
++{
++    ASSERT_TRUE(cblas_dgemm_pack_get_size(CblasAMatrix, 7, 9, 11) > 0);
++    ASSERT_TRUE(cblas_dgemm_pack_get_size(CblasBMatrix, 7, 9, 11) > 0);
++    ASSERT_TRUE(cblas_dgemm_pack_get_size(CblasAMatrix, 0, 0, 0) > 0);
++}
++
++CTEST(dgemm_pack, rowmajor_pack_b_notrans_notrans)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 50, 70, 30,
++                                 1.5, 2.0, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++CTEST(dgemm_pack, rowmajor_pack_a_trans_notrans)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasTrans, CblasNoTrans, 50, 70, 30,
++                                 0.5, 0.0, TRUE, FALSE, 3);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++CTEST(dgemm_pack, rowmajor_pack_both_trans_trans)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasTrans, CblasTrans, 33, 65, 17,
++                                 2.0, 1.0, TRUE, TRUE, 1);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++CTEST(dgemm_pack, colmajor_pack_b_notrans_trans)
++{
++    double err = check_dgemm_pack(CblasColMajor, CblasNoTrans, CblasTrans, 50, 70, 30,
++                                 1.5, 2.0, FALSE, TRUE, 2);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++CTEST(dgemm_pack, colmajor_pack_a_notrans_notrans)
++{
++    double err = check_dgemm_pack(CblasColMajor, CblasNoTrans, CblasNoTrans, 50, 70, 30,
++                                 1.5, 0.0, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++CTEST(dgemm_pack, colmajor_pack_both_trans_notrans)
++{
++    double err = check_dgemm_pack(CblasColMajor, CblasTrans, CblasNoTrans, 33, 65, 17,
++                                 0.75, 1.0, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++CTEST(dgemm_pack, pack_none_matches_gemm_with_alpha_one)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasNoTrans, CblasTrans, 40, 20, 60,
++                                 1.0, 0.5, FALSE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++CTEST(dgemm_pack, rowmajor_pack_both_k_1)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 33, 17, 1,
++                                 1.0, 0.0, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++/* k = 1000 exceeds GEMM_Q on every core, so the K loop takes at least two
++ * blocks and passes through the halving of the last block. */
++CTEST(dgemm_pack, rowmajor_pack_b_large_k)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 33, 65, 1000,
++                                 1.0, 0.0, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++/* n = 1700 makes the row-major B, the inner operand, span several GEMM_P blocks. */
++CTEST(dgemm_pack, rowmajor_pack_b_large_n)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasNoTrans, CblasTrans, 40, 1700, 300,
++                                 1.0, 0.0, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++/* m = 1700 makes the column-major A, the inner operand, span several GEMM_P blocks. */
++CTEST(dgemm_pack, colmajor_pack_a_large_m)
++{
++    double err = check_dgemm_pack(CblasColMajor, CblasTrans, CblasNoTrans, 1700, 40, 300,
++                                 1.0, 1.0, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++/* The row-major A is the outer operand. m = 9000 stays inside one GEMM_R panel
++ * on every x86-64 core with the default BUFFER_SIZE, so this covers a long
++ * single panel; the next test crosses the panel boundary. */
++CTEST(dgemm_pack, rowmajor_pack_a_large_m)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 9000, 8, 64,
++                                 1.0, 0.0, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++/* GEMM_R derives from BUFFER_SIZE and is about 65000 for sgemm with the default
++ * 128 MB buffer, so m = 70000 makes the packed outer operand span two GEMM_R
++ * panels in row-major order, and the packed B does the same in column-major
++ * order. */
++CTEST(dgemm_pack, pack_outer_operand_crosses_gemm_r)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 70000, 8, 16,
++                                 1.0, 0.0, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++    err = check_dgemm_pack(CblasColMajor, CblasNoTrans, CblasTrans, 8, 70000, 16,
++                           1.0, 0.5, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++CTEST(dgemm_pack, rowmajor_pack_both_large)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 1700, 1700, 300,
++                                 1.0, 0.0, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++CTEST(dgemm_pack, zero_k_scales_c_by_beta)
++{
++    double err = check_dgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 5, 6, 0,
++                                 1.0, 0.5, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++}
++
++/* The packed layout of B does not depend on m, so one packed B serves
++ * products with any number of rows. */
++CTEST(dgemm_pack, rowmajor_packed_b_reused_for_other_m)
++{
++    blasint n = 24, k = 40;
++    blasint pack_m = 8, sizes[3] = {1, 3, 40};
++    size_t size = cblas_dgemm_pack_get_size(CblasBMatrix, pack_m, n, k);
++    double *b = (double *)malloc((size_t)k * n * sizeof(double));
++    unsigned char *packed_b = alloc_packed(size);
++    int s;
++
++    drand_generate(b, k * n);
++    cblas_dgemm_pack(CblasRowMajor, CblasBMatrix, CblasNoTrans, pack_m, n, k, 1.0, b, n,
++                     (double *)packed_b);
++    ASSERT_TRUE(sentinel_intact(packed_b, size));
++
++    for (s = 0; s < 3; s++) {
++        blasint m = sizes[s];
++        double *a = (double *)malloc((size_t)m * k * sizeof(double));
++        double *c_ref = (double *)malloc((size_t)m * n * sizeof(double));
++        double *c_test = (double *)malloc((size_t)m * n * sizeof(double));
++        double max_diff = 0.0;
++        blasint i;
++
++        drand_generate(a, m * k);
++        for (i = 0; i < m * n; i++) c_ref[i] = c_test[i] = 0.0;
++
++        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, 1.0, a, k, b, n, 0.0,
++                    c_ref, n);
++        cblas_dgemm_compute(CblasRowMajor, CblasNoTrans, CblasPacked, m, n, k, a, k,
++                            (double *)packed_b, n, 0.0, c_test, n);
++
++        for (i = 0; i < m * n; i++)
++            if (fabs(c_test[i] - c_ref[i]) > max_diff) max_diff = fabs(c_test[i] - c_ref[i]);
++        ASSERT_DBL_NEAR_TOL(0.0, max_diff, DOUBLE_EPS);
++
++        free(a);
++        free(c_ref);
++        free(c_test);
++    }
++
++    free(b);
++    free_packed(packed_b);
++}
++
++/* The closed-form size that cblas_dgemm_pack_get_size computes must agree with
++ * the panels the pack writes for every tail regime of the M, N, and K blocking:
++ * a disagreement makes cblas_dgemm_pack reject the call and leaves the header
++ * unwritten, which the compute then rejects, so the product would not match.
++ * Column-major A is the inner operand (GEMM_P blocks), row-major A the outer
++ * one (GEMM_R blocks); k sweeps the GEMM_Q blocks including the halved tail. */
++CTEST(dgemm_pack, size_matches_layout_for_every_tail)
++{
++    blasint m, k;
++    double err;
++
++    for (m = 1; m <= 1400; m++) {
++        err = check_dgemm_pack(CblasColMajor, CblasNoTrans, CblasNoTrans, m, 2, 3, 1.0, 0.0, TRUE, FALSE, 0);
++        ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++        err = check_dgemm_pack(CblasRowMajor, CblasTrans, CblasNoTrans, m, 2, 3, 1.0, 0.0, TRUE, FALSE, 0);
++        ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++    }
++    for (k = 1; k <= 2200; k++) {
++        err = check_dgemm_pack(CblasColMajor, CblasNoTrans, CblasTrans, 3, 5, k, 1.0, 0.0, TRUE, TRUE, 0);
++        ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++    }
++}
++
++#if defined(__linux__)
++/* Every packed buffer ends exactly at a PROT_NONE page, so a copy routine or a
++ * kernel that reads or writes past cblas_dgemm_pack_get_size() faults instead
++ * of silently touching neighbouring memory. */
++CTEST(dgemm_pack, kernels_stay_inside_get_size)
++{
++    static const blasint ms[] = {1, 2, 3, 5, 7, 8, 13, 16, 17, 31, 32, 33, 64, 65, 127, 129, 300};
++    static const blasint ns[] = {1, 16, 33, 300};
++    static const blasint ks[] = {1, 3, 17, 129, 1000};
++    size_t mi, ni, ki;
++    int order, ta, tb, mode;
++
++    guard_pages = TRUE;
++    for (mi = 0; mi < sizeof(ms) / sizeof(ms[0]); mi++)
++    for (ni = 0; ni < sizeof(ns) / sizeof(ns[0]); ni++)
++    for (ki = 0; ki < sizeof(ks) / sizeof(ks[0]); ki++)
++    for (order = 0; order < 2; order++)
++    for (ta = 0; ta < 2; ta++)
++    for (tb = 0; tb < 2; tb++)
++    for (mode = 0; mode < 3; mode++) {
++        double err = check_dgemm_pack(order ? CblasColMajor : CblasRowMajor,
++                                     ta ? CblasTrans : CblasNoTrans, tb ? CblasTrans : CblasNoTrans,
++                                     ms[mi], ns[ni], ks[ki], 1.0, 0.0,
++                                     mode != 1, mode != 0, 0);
++        if (err > DOUBLE_EPS) {
++            guard_pages = FALSE;
++            ASSERT_DBL_NEAR_TOL(0.0, err, DOUBLE_EPS);
++        }
++    }
++    guard_pages = FALSE;
++}
++#endif
++
++/* The header is read and written with memcpy, so a buffer that is only
++ * aligned for its element type is accepted. */
++CTEST(dgemm_pack, buffer_needs_only_element_alignment)
++{
++    size_t size = cblas_dgemm_pack_get_size(CblasBMatrix, 6, 10, 12);
++    double *storage = (double *)malloc(size + 64);
++    double *packed_b = storage + 1;
++    double a[6 * 12], b[12 * 10], c_ref[6 * 10], c_test[6 * 10];
++    double max_diff = 0.0;
++    int i;
++
++    drand_generate(a, 6 * 12);
++    drand_generate(b, 12 * 10);
++    for (i = 0; i < 60; i++) c_ref[i] = c_test[i] = 0.0;
++
++    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, 6, 10, 12, 1.0, a, 12, b, 10, 0.0,
++                c_ref, 10);
++    cblas_dgemm_pack(CblasRowMajor, CblasBMatrix, CblasNoTrans, 6, 10, 12, 1.0, b, 10, packed_b);
++    cblas_dgemm_compute(CblasRowMajor, CblasNoTrans, CblasPacked, 6, 10, 12, a, 12, packed_b, 10,
++                        0.0, c_test, 10);
++
++    for (i = 0; i < 60; i++)
++        if (fabs(c_test[i] - c_ref[i]) > max_diff) max_diff = fabs(c_test[i] - c_ref[i]);
++    ASSERT_DBL_NEAR_TOL(0.0, max_diff, DOUBLE_EPS);
++
++    free(storage);
++}
++
++CTEST(dgemm_pack, xerbla_get_size_negative_k)
++{
++    set_xerbla("DGEMM_PACK_GET_SIZE ", 4);
++    ASSERT_TRUE(cblas_dgemm_pack_get_size(CblasAMatrix, 2, 2, -1) == 0);
++    ASSERT_TRUE(check_error());
++}
++
++/* Dimensions whose packed size does not fit are reported as parameter 0 and
++ * answered with 0, quickly: the size is computed in closed form. */
++CTEST(dgemm_pack, xerbla_get_size_overflow)
++{
++    blasint huge = (blasint)(((blasint)1 << (sizeof(blasint) * 8 - 2)) - 1) * 2 + 1;
++    double a[1];
++    double dest[64];
++
++    set_xerbla("DGEMM_PACK_GET_SIZE ", 0);
++    ASSERT_TRUE(cblas_dgemm_pack_get_size(CblasAMatrix, huge, 1, huge) == 0);
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("DGEMM_PACK ", 0);
++    cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, huge, 1, huge, 1.0, a, huge, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(dgemm_pack, xerbla_pack_src_null)
++{
++    double dest[64];
++
++    set_xerbla("DGEMM_PACK ", 8);
++    cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 2, 2, 2, 1.0, NULL, 2, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(dgemm_pack, xerbla_compute_operand_null)
++{
++    double a[4] = {0.0, 0.0, 0.0, 0.0};
++    double b[4] = {0.0, 0.0, 0.0, 0.0};
++    double c[4] = {0.0, 0.0, 0.0, 0.0};
++
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, NULL, 2, b, 2, 0.0, c, 2);
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("DGEMM_COMPUTE ", 9);
++    cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, a, 2, NULL, 2, 0.0, c, 2);
++    ASSERT_TRUE(check_error());
++}
++
++/* A header whose data offset disagrees with the buffer address is rejected;
++ * this also catches a packed buffer copied to a differently aligned address. */
++CTEST(dgemm_pack, xerbla_compute_rejects_shifted_data_offset)
++{
++    struct dgemm_pack_fixture f;
++    size_t size = cblas_dgemm_pack_get_size(CblasAMatrix, 4, 4, 4);
++    unsigned char *copy = (unsigned char *)malloc(size + 64);
++    unsigned char *shifted;
++    int i;
++
++    dgemm_pack_fixture_init(&f);
++    /* Move the bytes to an address with a different alignment modulo 64. */
++    shifted = copy;
++    while ((uintptr_t)shifted % 64 == (uintptr_t)f.packed_a % 64) shifted += 16;
++    memcpy(shifted, f.packed_a, size);
++
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 4, (double *)shifted, 4, f.b, 4,
++                        0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    for (i = 0; i < 16; i++) ASSERT_DBL_NEAR_TOL(7.0, f.c[i], DOUBLE_EPS);
++
++    free(copy);
++    dgemm_pack_fixture_free(&f);
++}
++
++CTEST(dgemm_pack, xerbla_pack_identifier_invalid)
++{
++    double a[4] = {0.0, 0.0, 0.0, 0.0};
++    double dest[64];
++
++    set_xerbla("DGEMM_PACK ", 2);
++    cblas_dgemm_pack(CblasColMajor, (enum CBLAS_IDENTIFIER)INVALID, CblasNoTrans, 2, 2, 2, 1.0,
++                     a, 2, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(dgemm_pack, xerbla_pack_trans_packed_invalid)
++{
++    double a[4] = {0.0, 0.0, 0.0, 0.0};
++    double dest[64];
++
++    set_xerbla("DGEMM_PACK ", 3);
++    cblas_dgemm_pack(CblasColMajor, CblasAMatrix, (enum CBLAS_TRANSPOSE)CblasPacked, 2, 2, 2, 1.0,
++                     a, 2, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(dgemm_pack, xerbla_pack_ld_invalid)
++{
++    double a[4] = {0.0, 0.0, 0.0, 0.0};
++    double dest[64];
++
++    set_xerbla("DGEMM_PACK ", 9);
++    cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 2, 2, 2, 1.0, a, 1, dest);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(dgemm_pack, xerbla_compute_transa_invalid)
++{
++    double a[4] = {0.0, 0.0, 0.0, 0.0};
++    double b[4] = {0.0, 0.0, 0.0, 0.0};
++    double c[4] = {0.0, 0.0, 0.0, 0.0};
++
++    set_xerbla("DGEMM_COMPUTE ", 2);
++    cblas_dgemm_compute(CblasColMajor, INVALID, CblasNoTrans, 2, 2, 2, a, 2, b, 2, 0.0, c, 2);
++    ASSERT_TRUE(check_error());
++}
++
++CTEST(dgemm_pack, xerbla_compute_ldc_invalid)
++{
++    double a[4] = {0.0, 0.0, 0.0, 0.0};
++    double b[4] = {0.0, 0.0, 0.0, 0.0};
++    double c[4] = {0.0, 0.0, 0.0, 0.0};
++
++    set_xerbla("DGEMM_COMPUTE ", 13);
++    cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, a, 2, b, 2, 0.0, c, 1);
++    ASSERT_TRUE(check_error());
++}
++
++/* A packed buffer made for another k is rejected before C is touched, and the
++ * offending operand is reported at the user's argument position in both
++ * storage orders. */
++CTEST(dgemm_pack, xerbla_compute_rejects_mismatched_k)
++{
++    struct dgemm_pack_fixture f;
++    double b5[20], a5[20];
++    int i;
++
++    dgemm_pack_fixture_init(&f);
++    for (i = 0; i < 20; i++) a5[i] = b5[i] = 1.0;
++
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 5, f.packed_a, 4, b5, 5,
++                        0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    set_xerbla("DGEMM_COMPUTE ", 9);
++    cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 5, a5, 4, f.packed_b, 4,
++                        0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    /* In row-major order the user's B is the driver's A and vice versa; the
++     * buffers below were packed row-major so that the identifiers match. */
++    cblas_dgemm_pack(CblasRowMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0, f.a, 4, f.packed_a);
++    cblas_dgemm_pack(CblasRowMajor, CblasBMatrix, CblasNoTrans, 4, 4, 4, 1.0, f.b, 4, f.packed_b);
++
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasRowMajor, CblasPacked, CblasNoTrans, 4, 4, 5, f.packed_a, 4, b5, 4,
++                        0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    set_xerbla("DGEMM_COMPUTE ", 9);
++    cblas_dgemm_compute(CblasRowMajor, CblasNoTrans, CblasPacked, 4, 4, 5, a5, 5, f.packed_b, 4,
++                        0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    dgemm_pack_fixture_free(&f);
++}
++
++/* A buffer packed as A is not accepted in the B position, and vice versa. */
++CTEST(dgemm_pack, xerbla_compute_rejects_swapped_identifier)
++{
++    struct dgemm_pack_fixture f;
++
++    dgemm_pack_fixture_init(&f);
++
++    set_xerbla("DGEMM_COMPUTE ", 9);
++    cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 4, f.a, 4, f.packed_a, 4,
++                        0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 4, f.packed_b, 4, f.b, 4,
++                        0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    dgemm_pack_fixture_free(&f);
++}
++
++/* The extent of the packed operand itself must match; the other extent may
++ * differ (see rowmajor_packed_b_reused_for_other_m). */
++CTEST(dgemm_pack, xerbla_compute_rejects_mismatched_own_extent)
++{
++    struct dgemm_pack_fixture f;
++    double b_wide[4 * 5];
++    double c_wide[4 * 5];
++    int i;
++
++    dgemm_pack_fixture_init(&f);
++    for (i = 0; i < 20; i++) {
++        b_wide[i] = 1.0;
++        c_wide[i] = 7.0;
++    }
++
++    /* Packed A is 4 x 4; asking for m = 5 rows of op(A) must fail. */
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 5, 4, 4, f.packed_a, 5, f.b, 4,
++                        0.0, c_wide, 5);
++    ASSERT_TRUE(check_error());
++    for (i = 0; i < 20; i++) ASSERT_DBL_NEAR_TOL(7.0, c_wide[i], DOUBLE_EPS);
++
++    /* Packed B has 4 columns; asking for n = 5 must fail, while a different m
++     * with the same packed B is fine. */
++    set_xerbla("DGEMM_COMPUTE ", 9);
++    cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 5, 4, f.a, 4, f.packed_b, 4,
++                        0.0, c_wide, 4);
++    ASSERT_TRUE(check_error());
++    for (i = 0; i < 20; i++) ASSERT_DBL_NEAR_TOL(7.0, c_wide[i], DOUBLE_EPS);
++
++    (void)b_wide;
++    dgemm_pack_fixture_free(&f);
++}
++
++/* A zero-filled buffer has no valid header. */
++CTEST(dgemm_pack, xerbla_compute_rejects_zeroed_buffer)
++{
++    struct dgemm_pack_fixture f;
++    size_t size = cblas_dgemm_pack_get_size(CblasAMatrix, 4, 4, 4);
++    double *zeroed = (double *)calloc(size, 1);
++
++    dgemm_pack_fixture_init(&f);
++
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 4, zeroed, 4, f.b, 4, 0.0,
++                        f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    free(zeroed);
++    dgemm_pack_fixture_free(&f);
++}
++
++/* When both packed operands are unusable, the lower argument (a, 7) is
++ * reported in both storage orders. */
++CTEST(dgemm_pack, xerbla_compute_reports_a_when_both_invalid)
++{
++    struct dgemm_pack_fixture f;
++
++    dgemm_pack_fixture_init(&f);
++
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasColMajor, CblasPacked, CblasPacked, 4, 4, 5, f.packed_a, 4,
++                        f.packed_b, 4, 0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasRowMajor, CblasPacked, CblasPacked, 4, 4, 5, f.packed_a, 4,
++                        f.packed_b, 4, 0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    dgemm_pack_fixture_free(&f);
++}
++
++#ifdef BUILD_SINGLE
++/* A buffer packed by cblas_sgemm_pack is not accepted by cblas_dgemm_compute. */
++CTEST(dgemm_pack, xerbla_compute_rejects_foreign_pack)
++{
++    struct dgemm_pack_fixture f;
++    float a[16];
++    float *foreign = (float *)malloc(cblas_sgemm_pack_get_size(CblasAMatrix, 4, 4, 4));
++    int i;
++
++    dgemm_pack_fixture_init(&f);
++    for (i = 0; i < 16; i++) a[i] = 1.0f;
++    cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0f, a, 4, foreign);
++
++    set_xerbla("DGEMM_COMPUTE ", 7);
++    cblas_dgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 4, (double *)foreign, 4, f.b,
++                        4, 0.0, f.c, 4);
++    ASSERT_TRUE(check_error());
++    ASSERT_TRUE(c_untouched(f.c));
++
++    free(foreign);
++    dgemm_pack_fixture_free(&f);
++}
++#endif
++
++#endif /* NO_CBLAS */
++#endif /* BUILD_DOUBLE */
+diff --git a/utest/test_extensions/test_sbgemm_pack.c b/utest/test_extensions/test_sbgemm_pack.c
+new file mode 100644
+index 000000000..4cb8b70a3
+--- /dev/null
++++ b/utest/test_extensions/test_sbgemm_pack.c
+@@ -0,0 +1,398 @@
++/*****************************************************************************
++Copyright (c) 2026, The OpenBLAS Project
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are
++met:
++
++   1. Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++
++   2. Redistributions in binary form must reproduce the above copyright
++      notice, this list of conditions and the following disclaimer in
++      the documentation and/or other materials provided with the
++      distribution.
++   3. Neither the name of the OpenBLAS project nor the names of
++      its contributors may be used to endorse or promote products
++      derived from this software without specific prior written
++      permission.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
++OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
++USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++**********************************************************************************/
++
++#include "utest/openblas_utest.h"
++#include "common.h"
++
++#ifdef BUILD_BFLOAT16
++#ifndef NO_CBLAS
++
++#define PACK_SENTINEL 0x5A
++#define PACK_SENTINEL_BYTES 16
++
++/* See test_sgemm_pack.c: malloc with a sentinel tail, or, with guard_pages set
++ * (Linux only), mmap placed so that the buffer ends at a PROT_NONE page. */
++static int guard_pages = FALSE;
++
++#if defined(__linux__)
++#include <sys/mman.h>
++#include <unistd.h>
++
++struct guard_map {
++    unsigned char *ptr;
++    void *base;
++    size_t len;
++};
++static struct guard_map guard_maps[2];
++
++static unsigned char *guard_alloc(size_t size)
++{
++    size_t page = (size_t)sysconf(_SC_PAGESIZE);
++    size_t pages = (size + page - 1) / page;
++    void *base = mmap(NULL, (pages + 1) * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++    int slot = guard_maps[0].ptr == NULL ? 0 : 1;
++    if (base == MAP_FAILED) return NULL;
++    mprotect((char *)base + pages * page, page, PROT_NONE);
++    guard_maps[slot].base = base;
++    guard_maps[slot].len = (pages + 1) * page;
++    guard_maps[slot].ptr = (unsigned char *)base + pages * page - size;
++    return guard_maps[slot].ptr;
++}
++
++static void guard_free(unsigned char *ptr)
++{
++    int slot;
++    for (slot = 0; slot < 2; slot++) {
++        if (guard_maps[slot].ptr == ptr) {
++            munmap(guard_maps[slot].base, guard_maps[slot].len);
++            guard_maps[slot].ptr = NULL;
++            return;
++        }
++    }
++}
++#endif
++
++static unsigned char *alloc_packed(size_t size)
++{
++    unsigned char *buffer;
++    if (size == 0) return NULL;
++#if defined(__linux__)
++    if (guard_pages) return guard_alloc(size);
++#endif
++    buffer = (unsigned char *)malloc(size + PACK_SENTINEL_BYTES);
++    if (buffer != NULL) memset(buffer + size, PACK_SENTINEL, PACK_SENTINEL_BYTES);
++    return buffer;
++}
++
++static void free_packed(unsigned char *buffer)
++{
++    if (buffer == NULL) return;
++#if defined(__linux__)
++    if (guard_pages) {
++        guard_free(buffer);
++        return;
++    }
++#endif
++    free(buffer);
++}
++
++static int sentinel_intact(const unsigned char *buffer, size_t size)
++{
++    size_t i;
++    if (guard_pages) return TRUE;
++    for (i = 0; i < PACK_SENTINEL_BYTES; i++)
++        if (buffer[size + i] != PACK_SENTINEL) return FALSE;
++    return TRUE;
++}
++
++/* Random bfloat16 values in [0, 1). The conversion truncates the float bits
++ * instead of calling cblas_sbstobf16, whose threaded path does not return for
++ * n > 100000 when OPENBLAS_NUM_THREADS=1 (an unrelated upstream issue). */
++static bfloat16 to_bf16(float value)
++{
++    uint32_t bits;
++    memcpy(&bits, &value, sizeof(bits));
++    return (bfloat16)(bits >> 16);
++}
++
++static bfloat16 *random_bf16(size_t count)
++{
++    float *values = (float *)malloc((count + 1) * sizeof(float));
++    bfloat16 *result = (bfloat16 *)malloc((count + 1) * sizeof(bfloat16));
++    size_t i;
++    srand_generate(values, (blasint)count);
++    for (i = 0; i < count; i++) result[i] = to_bf16(values[i]);
++    free(values);
++    return result;
++}
++
++/**
++ * Compute the reference with cblas_sbgemm, pack the requested operands with
++ * cblas_sbgemm_pack, run cblas_sbgemm_compute, and return the largest
++ * absolute difference divided by (1 + largest reference magnitude).
++ *
++ * When only one operand is packed it records alpha. When both are packed, A
++ * records alpha and B records 3, so that the product of the two recorded
++ * values, which cblas_sbgemm_compute applies, differs from either of them.
++ */
++static float check_sbgemm_pack(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE transa,
++                               enum CBLAS_TRANSPOSE transb, blasint m, blasint n, blasint k,
++                               float alpha, float beta, int pack_a, int pack_b, blasint pad)
++{
++    int row_major = (order == CblasRowMajor);
++    blasint a_rows = (transa == CblasNoTrans) ? m : k;
++    blasint a_cols = (transa == CblasNoTrans) ? k : m;
++    blasint b_rows = (transb == CblasNoTrans) ? k : n;
++    blasint b_cols = (transb == CblasNoTrans) ? n : k;
++    blasint lda = (row_major ? a_cols : a_rows) + pad;
++    blasint ldb = (row_major ? b_cols : b_rows) + pad;
++    blasint ldc = (row_major ? n : m) + pad;
++    size_t a_size = (size_t)(row_major ? a_rows : a_cols) * (size_t)lda;
++    size_t b_size = (size_t)(row_major ? b_rows : b_cols) * (size_t)ldb;
++    size_t c_size = (size_t)(row_major ? m : n) * (size_t)ldc;
++    bfloat16 *a = random_bf16(a_size);
++    bfloat16 *b = random_bf16(b_size);
++    float *c_ref = (float *)malloc((c_size + 1) * sizeof(float));
++    float *c_test = (float *)malloc((c_size + 1) * sizeof(float));
++    unsigned char *packed_a = NULL, *packed_b = NULL;
++    size_t size_a = 0, size_b = 0;
++    float alpha_a = pack_a ? alpha : 1.0f;
++    float alpha_b = pack_b ? (pack_a ? 3.0f : alpha) : 1.0f;
++    float ref_alpha = alpha_a * alpha_b;
++    float max_diff = 0.0f, max_ref = 0.0f;
++    size_t i;
++
++    srand_generate(c_ref, (blasint)c_size);
++    for (i = 0; i < c_size; i++) c_test[i] = c_ref[i];
++
++    cblas_sbgemm(order, transa, transb, m, n, k, ref_alpha, a, lda, b, ldb, beta, c_ref, ldc);
++
++    if (pack_a) {
++        size_a = cblas_sbgemm_pack_get_size(CblasAMatrix, m, n, k);
++        packed_a = alloc_packed(size_a);
++        cblas_sbgemm_pack(order, CblasAMatrix, transa, m, n, k, alpha_a, a, lda, (bfloat16 *)packed_a);
++    }
++    if (pack_b) {
++        size_b = cblas_sbgemm_pack_get_size(CblasBMatrix, m, n, k);
++        packed_b = alloc_packed(size_b);
++        cblas_sbgemm_pack(order, CblasBMatrix, transb, m, n, k, alpha_b, b, ldb, (bfloat16 *)packed_b);
++    }
++
++    cblas_sbgemm_compute(order, pack_a ? (blasint)CblasPacked : (blasint)transa,
++                         pack_b ? (blasint)CblasPacked : (blasint)transb, m, n, k,
++                         pack_a ? (bfloat16 *)packed_a : a, lda,
++                         pack_b ? (bfloat16 *)packed_b : b, ldb, beta, c_test, ldc);
++
++    for (i = 0; i < c_size; i++) {
++        float diff = fabsf(c_test[i] - c_ref[i]);
++        if (diff > max_diff) max_diff = diff;
++        if (fabsf(c_ref[i]) > max_ref) max_ref = fabsf(c_ref[i]);
++    }
++
++    if ((pack_a && !sentinel_intact(packed_a, size_a)) ||
++        (pack_b && !sentinel_intact(packed_b, size_b)))
++        max_diff = 1.0e30f;
++
++    free(a);
++    free(b);
++    free(c_ref);
++    free(c_test);
++    free_packed(packed_a);
++    free_packed(packed_b);
++
++    return max_diff / (1.0f + max_ref);
++}
++
++CTEST(sbgemm_pack, get_size_is_positive)
++{
++    ASSERT_TRUE(cblas_sbgemm_pack_get_size(CblasAMatrix, 7, 9, 11) > 0);
++    ASSERT_TRUE(cblas_sbgemm_pack_get_size(CblasBMatrix, 7, 9, 11) > 0);
++}
++
++CTEST(sbgemm_pack, rowmajor_pack_b_notrans_notrans)
++{
++    float err = check_sbgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 50, 70, 30,
++                                  1.5f, 2.0f, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sbgemm_pack, rowmajor_pack_a_trans_notrans)
++{
++    float err = check_sbgemm_pack(CblasRowMajor, CblasTrans, CblasNoTrans, 50, 70, 30,
++                                  0.5f, 0.0f, TRUE, FALSE, 3);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sbgemm_pack, rowmajor_pack_both_trans_trans)
++{
++    float err = check_sbgemm_pack(CblasRowMajor, CblasTrans, CblasTrans, 33, 65, 17,
++                                  2.0f, 1.0f, TRUE, TRUE, 1);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sbgemm_pack, colmajor_pack_b_notrans_trans)
++{
++    float err = check_sbgemm_pack(CblasColMajor, CblasNoTrans, CblasTrans, 50, 70, 30,
++                                  1.5f, 2.0f, FALSE, TRUE, 2);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sbgemm_pack, colmajor_pack_a_notrans_notrans)
++{
++    float err = check_sbgemm_pack(CblasColMajor, CblasNoTrans, CblasNoTrans, 50, 70, 30,
++                                  1.5f, 0.0f, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sbgemm_pack, colmajor_pack_both_trans_notrans)
++{
++    float err = check_sbgemm_pack(CblasColMajor, CblasTrans, CblasNoTrans, 33, 65, 17,
++                                  0.75f, 1.0f, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* Odd k exercises the bfloat16 pair handling of the copy routines. */
++CTEST(sbgemm_pack, rowmajor_pack_b_odd_k)
++{
++    float err = check_sbgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 33, 17, 1,
++                                  1.0f, 0.0f, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++    err = check_sbgemm_pack(CblasRowMajor, CblasTrans, CblasNoTrans, 33, 17, 3,
++                            1.0f, 0.0f, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* k = 1000 exceeds GEMM_Q on the cores this can run on, so the K loop takes at
++ * least two blocks and passes through the halving of the last block. */
++CTEST(sbgemm_pack, rowmajor_pack_b_large_k)
++{
++    float err = check_sbgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 33, 65, 1000,
++                                  1.0f, 0.0f, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++CTEST(sbgemm_pack, rowmajor_pack_b_large_n)
++{
++    float err = check_sbgemm_pack(CblasRowMajor, CblasNoTrans, CblasTrans, 40, 1700, 300,
++                                  1.0f, 0.0f, FALSE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* m = 9000 stays inside one GEMM_R panel of the row-major A (the outer
++ * operand) on every x86-64 core with the default BUFFER_SIZE. */
++CTEST(sbgemm_pack, rowmajor_pack_a_large_m)
++{
++    float err = check_sbgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 9000, 8, 64,
++                                  1.0f, 0.0f, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* GEMM_R for sbgemm derives from BUFFER_SIZE and is below 131000 on every
++ * x86-64 core with the default 128 MB buffer, so m = 140000 makes the packed
++ * outer operand span two GEMM_R panels. */
++CTEST(sbgemm_pack, pack_outer_operand_crosses_gemm_r)
++{
++    float err = check_sbgemm_pack(CblasRowMajor, CblasNoTrans, CblasNoTrans, 140000, 8, 16,
++                                  1.0f, 0.0f, TRUE, FALSE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++    err = check_sbgemm_pack(CblasColMajor, CblasNoTrans, CblasTrans, 8, 140000, 16,
++                            1.0f, 0.5f, TRUE, TRUE, 0);
++    ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++}
++
++/* See test_sgemm_pack.c. Odd k matters for bfloat16, whose copies pair rows. */
++CTEST(sbgemm_pack, size_matches_layout_for_every_tail)
++{
++    blasint m, k;
++    float err;
++
++    for (m = 1; m <= 1400; m++) {
++        err = check_sbgemm_pack(CblasColMajor, CblasNoTrans, CblasNoTrans, m, 2, 3, 1.0f, 0.0f, TRUE, FALSE, 0);
++        ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++        err = check_sbgemm_pack(CblasRowMajor, CblasTrans, CblasNoTrans, m, 2, 3, 1.0f, 0.0f, TRUE, FALSE, 0);
++        ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++    }
++    for (k = 1; k <= 2200; k++) {
++        err = check_sbgemm_pack(CblasColMajor, CblasNoTrans, CblasTrans, 3, 5, k, 1.0f, 0.0f, TRUE, TRUE, 0);
++        ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++    }
++}
++
++#if defined(__linux__)
++CTEST(sbgemm_pack, kernels_stay_inside_get_size)
++{
++    static const blasint ms[] = {1, 2, 3, 5, 7, 8, 13, 16, 17, 31, 32, 33, 64, 65, 127, 129, 300};
++    static const blasint ns[] = {1, 16, 33, 300};
++    static const blasint ks[] = {1, 3, 17, 129, 1000};
++    size_t mi, ni, ki;
++    int order, ta, tb, mode;
++
++    guard_pages = TRUE;
++    for (mi = 0; mi < sizeof(ms) / sizeof(ms[0]); mi++)
++    for (ni = 0; ni < sizeof(ns) / sizeof(ns[0]); ni++)
++    for (ki = 0; ki < sizeof(ks) / sizeof(ks[0]); ki++)
++    for (order = 0; order < 2; order++)
++    for (ta = 0; ta < 2; ta++)
++    for (tb = 0; tb < 2; tb++)
++    for (mode = 0; mode < 3; mode++) {
++        float err = check_sbgemm_pack(order ? CblasColMajor : CblasRowMajor,
++                                      ta ? CblasTrans : CblasNoTrans, tb ? CblasTrans : CblasNoTrans,
++                                      ms[mi], ns[ni], ks[ki], 1.0f, 0.0f,
++                                      mode != 1, mode != 0, 0);
++        if (err > SINGLE_EPS) {
++            guard_pages = FALSE;
++            ASSERT_DBL_NEAR_TOL(0.0f, err, SINGLE_EPS);
++        }
++    }
++    guard_pages = FALSE;
++}
++#endif
++
++CTEST(sbgemm_pack, xerbla_compute_transb_invalid)
++{
++    bfloat16 a[4] = {0, 0, 0, 0};
++    bfloat16 b[4] = {0, 0, 0, 0};
++    float c[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++
++    set_xerbla("SBGEMM_COMPUTE ", 3);
++    cblas_sbgemm_compute(CblasColMajor, CblasNoTrans, INVALID, 2, 2, 2, a, 2, b, 2, 0.0f, c, 2);
++    ASSERT_TRUE(check_error());
++}
++
++/* A buffer packed by cblas_sgemm_pack is not accepted by cblas_sbgemm_compute. */
++CTEST(sbgemm_pack, xerbla_compute_rejects_foreign_pack)
++{
++#ifdef BUILD_SINGLE
++    float a[16];
++    bfloat16 b[16] = {0};
++    float c[16];
++    size_t size = cblas_sgemm_pack_get_size(CblasAMatrix, 4, 4, 4);
++    float *packed_a = (float *)malloc(size);
++    int i;
++
++    for (i = 0; i < 16; i++) a[i] = 1.0f;
++    for (i = 0; i < 16; i++) c[i] = 7.0f;
++    cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0f, a, 4, packed_a);
++
++    set_xerbla("SBGEMM_COMPUTE ", 7);
++    cblas_sbgemm_compute(CblasColMajor, CblasPacked, CblasNoTrans, 4, 4, 4, (bfloat16 *)packed_a, 4,
++                         b, 4, 0.0f, c, 4);
++    ASSERT_TRUE(check_error());
++    for (i = 0; i < 16; i++) ASSERT_DBL_NEAR_TOL(7.0f, c[i], SINGLE_EPS);
++
++    free(packed_a);
++#endif
++}
++
++#endif /* NO_CBLAS */
++#endif /* BUILD_BFLOAT16 */
