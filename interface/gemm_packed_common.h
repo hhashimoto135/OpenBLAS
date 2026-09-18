@@ -55,16 +55,19 @@
 #define GEMM_PACKED_PACK    sbgemm_packed_pack
 #define GEMM_PACKED_COMPUTE sbgemm_packed_compute
 #define GEMM_PACKED_PREFIX  "SBGEMM"
+#define GEMM_PACKED_TAG     GEMM_PACKED_TAG_SB
 #elif defined(DOUBLE)
 #define GEMM_PACKED_SIZE    dgemm_packed_size
 #define GEMM_PACKED_PACK    dgemm_packed_pack
 #define GEMM_PACKED_COMPUTE dgemm_packed_compute
 #define GEMM_PACKED_PREFIX  "DGEMM"
+#define GEMM_PACKED_TAG     GEMM_PACKED_TAG_D
 #else
 #define GEMM_PACKED_SIZE    sgemm_packed_size
 #define GEMM_PACKED_PACK    sgemm_packed_pack
 #define GEMM_PACKED_COMPUTE sgemm_packed_compute
 #define GEMM_PACKED_PREFIX  "SGEMM"
+#define GEMM_PACKED_TAG     GEMM_PACKED_TAG_S
 #endif
 
 /* Maps a CBLAS transpose value to the 0/1 code of the driver. Real types treat

@@ -144,7 +144,9 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_IDENTIFIER identifier, enum CBLAS_
                             alpha, src, (BLASLONG)ld, (void *)dest);
   if (status != 0) {
     /* 2: the packed size does not fit, so cblas_?gemm_pack_get_size had
-     * returned 0 for these dimensions; 3: internal layout inconsistency. */
+     * returned 0 for these dimensions; 3: internal layout inconsistency;
+     * 4: the float expansion of the single precision SBGEMM fallback could
+     * not be allocated. */
     info = 0;
     BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
   }

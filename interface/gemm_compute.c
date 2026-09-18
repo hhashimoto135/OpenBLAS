@@ -54,6 +54,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "common.h"
+#include "common_sbfallback.h"
 #include "gemm_packed_common.h"
 
 #define ERROR_NAME GEMM_PACKED_PREFIX "_COMPUTE "
@@ -161,9 +162,18 @@ void CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, bl
 #else
   sa = (XFLOAT *)((BLASLONG)buffer + GEMM_OFFSET_A);
 #endif
+#ifdef SBGEMM_FLOAT_FALLBACK
+  /* The fallback runs the SGEMM kernels on float panels, so the scratch is
+   * divided where a regular SGEMM divides it, not where SBGEMM would. */
+  if (sbgemm_float_fallback()) {
+    sb = (XFLOAT *)(((BLASLONG)sa + (((BLASLONG)SGEMM_P * (BLASLONG)SGEMM_Q * (BLASLONG)sizeof(float)
+                                      + GEMM_ALIGN) & ~GEMM_ALIGN)) + GEMM_OFFSET_B);
+  } else
+#endif
   sb = (XFLOAT *)(((BLASLONG)sa + ((GEMM_P * GEMM_Q * COMPSIZE * SIZE + GEMM_ALIGN) & ~GEMM_ALIGN)) + GEMM_OFFSET_B);
 
-  status = GEMM_PACKED_COMPUTE(&args, internal_ta, internal_tb, internal_a_packed, internal_b_packed, sa, sb);
+  status = GEMM_PACKED_COMPUTE(&args, internal_ta, internal_tb, internal_a_packed, internal_b_packed,
+                               sa, sb, GEMM_PACKED_TAG);
 
   blas_memory_free(buffer);
 

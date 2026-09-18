@@ -2078,6 +2078,14 @@ int sbgemm_batch_thread(blas_arg_t * queue, BLASLONG nums);
 #define GEMM_PACKED_TAIL_GUARD   16384
 #define GEMM_PACKED_IDENTIFIER_A 0
 #define GEMM_PACKED_IDENTIFIER_B 1
+/* Element type a packed buffer was built for, recorded in its header and
+ * checked by ?gemm_packed_compute. The SBGEMM fallback of
+ * common_sbfallback.h packs float panels through sgemm_packed_pack but keeps
+ * the SBGEMM tag on them, so the expected tag is passed to the compute driver
+ * rather than taken from the type it was compiled for. */
+#define GEMM_PACKED_TAG_S        0x00000073u /* "s"  */
+#define GEMM_PACKED_TAG_D        0x00000064u /* "d"  */
+#define GEMM_PACKED_TAG_SB       0x00007362u /* "sb" */
 
 size_t sgemm_packed_size(BLASLONG extent, BLASLONG k);
 size_t dgemm_packed_size(BLASLONG extent, BLASLONG k);
@@ -2090,12 +2098,15 @@ int dgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLON
 int sbgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
                        float alpha, bfloat16 *src, BLASLONG ld, void *dest);
 
+/* `type_tag` is the GEMM_PACKED_TAG_* a packed operand must carry to be
+ * accepted; it is the tag of the entry point the caller used, not of this
+ * driver. */
 int sgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
-                         float *sa, float *sb);
+                         float *sa, float *sb, unsigned int type_tag);
 int dgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
-                         double *sa, double *sb);
+                         double *sa, double *sb, unsigned int type_tag);
 int sbgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
-                          bfloat16 *sa, bfloat16 *sb);
+                          bfloat16 *sa, bfloat16 *sb, unsigned int type_tag);
 
 #ifdef __CUDACC__
 }

@@ -1,0 +1,686 @@
+diff --git a/common_level3.h b/common_level3.h
+index 880567f63..6118dd07c 100644
+--- a/common_level3.h
++++ b/common_level3.h
+@@ -2078,6 +2078,14 @@ int sbgemm_batch_thread(blas_arg_t * queue, BLASLONG nums);
+ #define GEMM_PACKED_TAIL_GUARD   16384
+ #define GEMM_PACKED_IDENTIFIER_A 0
+ #define GEMM_PACKED_IDENTIFIER_B 1
++/* Element type a packed buffer was built for, recorded in its header and
++ * checked by ?gemm_packed_compute. The SBGEMM fallback of
++ * common_sbfallback.h packs float panels through sgemm_packed_pack but keeps
++ * the SBGEMM tag on them, so the expected tag is passed to the compute driver
++ * rather than taken from the type it was compiled for. */
++#define GEMM_PACKED_TAG_S        0x00000073u /* "s"  */
++#define GEMM_PACKED_TAG_D        0x00000064u /* "d"  */
++#define GEMM_PACKED_TAG_SB       0x00007362u /* "sb" */
+ 
+ size_t sgemm_packed_size(BLASLONG extent, BLASLONG k);
+ size_t dgemm_packed_size(BLASLONG extent, BLASLONG k);
+@@ -2090,12 +2098,15 @@ int dgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLON
+ int sbgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
+                        float alpha, bfloat16 *src, BLASLONG ld, void *dest);
+ 
++/* `type_tag` is the GEMM_PACKED_TAG_* a packed operand must carry to be
++ * accepted; it is the tag of the entry point the caller used, not of this
++ * driver. */
+ int sgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
+-                         float *sa, float *sb);
++                         float *sa, float *sb, unsigned int type_tag);
+ int dgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
+-                         double *sa, double *sb);
++                         double *sa, double *sb, unsigned int type_tag);
+ int sbgemm_packed_compute(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
+-                          bfloat16 *sa, bfloat16 *sb);
++                          bfloat16 *sa, bfloat16 *sb, unsigned int type_tag);
+ 
+ #ifdef __CUDACC__
+ }
+diff --git a/common_sbfallback.h b/common_sbfallback.h
+new file mode 100644
+index 000000000..af731ee50
+--- /dev/null
++++ b/common_sbfallback.h
+@@ -0,0 +1,166 @@
++/*********************************************************************/
++/* Copyright 2026 The OpenBLAS Project                               */
++/* All rights reserved.                                              */
++/*                                                                   */
++/* Redistribution and use in source and binary forms, with or        */
++/* without modification, are permitted provided that the following   */
++/* conditions are met:                                               */
++/*                                                                   */
++/*   1. Redistributions of source code must retain the above         */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer.                                                  */
++/*                                                                   */
++/*   2. Redistributions in binary form must reproduce the above      */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer in the documentation and/or other materials       */
++/*      provided with the distribution.                              */
++/*                                                                   */
++/*    THIS SOFTWARE IS PROVIDED BY THE OPENBLAS PROJECT ``AS IS''    */
++/*    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      */
++/*    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND      */
++/*    FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT   */
++/*    SHALL THE OPENBLAS PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY   */
++/*    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR           */
++/*    CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,          */
++/*    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,      */
++/*    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED     */
++/*    AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT    */
++/*    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)         */
++/*    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF    */
++/*    ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.                     */
++/*********************************************************************/
++
++/*
++ * Single precision fallback for SBGEMM on x86-64 cores that have no bfloat16
++ * GEMM kernel.
++ *
++ * kernel/Makefile.L3 leaves SBGEMMKERNEL at ../generic/gemmkernel_2x2.c with
++ * ../generic/gemm_ncopy_2.c and ../generic/gemm_tcopy_2.c for every core that
++ * does not set it. On x86-64 only KERNEL.COOPERLAKE and KERNEL.SAPPHIRERAPIDS
++ * do, so on everything else SBGEMM runs a scalar 2x2 C kernel while SGEMM runs
++ * a tuned one. That kernel widens every element to float with SBF16TOS_K
++ * before multiplying, so expanding both operands the same way up front and
++ * running the SGEMM kernels computes the same product at SGEMM speed. The
++ * price is a float copy of each operand, twice the bytes of the bfloat16
++ * original, and a summation order that differs from both the 2x2 kernel and
++ * the Cooperlake kernel, so results agree to rounding rather than bit for bit.
++ *
++ * The widening preserves every normal value; it is SBF16TOS_K that decides the
++ * rest, flushing denormals to a zero of the same sign and making signalling
++ * NaNs quiet. sbgemm_widen() below repeats those two rules so that the
++ * fallback and the 2x2 kernel see identical operands.
++ *
++ * The condition is the core selected at run time, not the instruction set of
++ * the CPU: OPENBLAS_CORETYPE can pin a core without a bfloat16 kernel on a CPU
++ * that supports AVX512-BF16, and that core is what decides which kernel runs.
++ *
++ * Only x86-64 is covered. Other architectures either ship a bfloat16 kernel
++ * (POWER10, Neoverse N2, RISC-V ZVL) or are outside what this fork targets.
++ */
++
++#ifndef COMMON_SBFALLBACK_H
++#define COMMON_SBFALLBACK_H
++
++#if defined(BFLOAT16) && !defined(BGEMM) && defined(ARCH_X86_64) && defined(BUILD_SINGLE)
++#define SBGEMM_FLOAT_FALLBACK 1
++#endif
++
++#ifdef SBGEMM_FLOAT_FALLBACK
++
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++#ifdef DYNAMIC_ARCH
++extern char *gotoblas_corename(void);
++#endif
++
++extern void openblas_warning(int verbose, const char *msg);
++
++/* The compute side leaves C untouched and reports success; the pack side has
++ * an error to report, so it says less. */
++#define SBGEMM_FALLBACK_SKIPPED "sbgemm: cannot allocate the float expansion, skipping\n"
++#define SBGEMM_FALLBACK_NO_MEMORY "sbgemm: cannot allocate the float expansion\n"
++
++/* Non-zero when SBGEMM must be computed with the SGEMM kernels. */
++static inline int sbgemm_float_fallback(void) {
++#if defined(DYNAMIC_ARCH)
++  const char *core = gotoblas_corename();
++  return strcmp(core, "Cooperlake") != 0 && strcmp(core, "SapphireRapids") != 0;
++#elif defined(COOPERLAKE) || defined(SAPPHIRERAPIDS)
++  return 0;
++#else
++  return 1;
++#endif
++}
++
++/*
++ * Widens `n` contiguous bfloat16 values to float.
++ *
++ * This is SBF16TOS_K written without the per element switch, so that the
++ * compiler can vectorize it: kernel/x86_64/bf16to.c is scalar on every x86-64
++ * core and costs more than the GEMM it would feed. The three cases it treats
++ * specially are kept exactly - a denormal (biased exponent 0) flushes to a
++ * zero of the same sign, a NaN gets its quiet bit forced, and everything else
++ * is the bfloat16 pattern in the upper half of the float.
++ */
++static inline void sbgemm_widen(const bfloat16 *src, float *dest, BLASLONG n) {
++  BLASLONG i;
++
++  for (i = 0; i < n; i++) {
++    uint32_t bits = (uint32_t)src[i];
++    uint32_t exponent = bits & 0x7f80u;
++    /* All ones or all zeros, so that the two corrections are plain masks. */
++    uint32_t denormal = (uint32_t)0 - (uint32_t)(exponent == 0);
++    uint32_t nan = (uint32_t)0 - (uint32_t)(exponent == 0x7f80u && (bits & 0x007fu) != 0);
++
++    bits = (bits & (0x8000u | ~denormal)) | (nan & 0x0040u);
++    bits <<= 16;
++    memcpy(dest + i, &bits, sizeof(bits));
++  }
++}
++
++/*
++ * Expands `rows` x `cols` of the column-major bfloat16 matrix `src`, whose
++ * leading dimension is `ld`, into a freshly allocated compact column-major
++ * float matrix with leading dimension `rows`. Returns NULL when the size does
++ * not fit or the allocation fails; free the result with free().
++ *
++ * An empty matrix still returns a one element allocation, so that NULL keeps
++ * meaning failure at the call sites.
++ */
++static inline float *sbgemm_expand_to_float(bfloat16 *src, BLASLONG rows, BLASLONG cols, BLASLONG ld) {
++  size_t count;
++  float *dest;
++  BLASLONG j;
++
++  if (rows < 0 || cols < 0) return NULL;
++  if (cols != 0 && (size_t)rows > (SIZE_MAX / sizeof(float)) / (size_t)cols) return NULL;
++
++  count = (size_t)rows * (size_t)cols;
++  dest = (float *)malloc((count != 0 ? count : 1) * sizeof(float));
++  if (dest == NULL) return NULL;
++  /* Nothing to read, and `src` may legitimately be NULL for an empty
++   * operand. */
++  if (count == 0) return dest;
++
++  if (ld == rows) {
++    /* Contiguous source: one pass with no column boundary to interrupt it. */
++    sbgemm_widen(src, dest, (BLASLONG)count);
++  } else {
++    for (j = 0; j < cols; j++) {
++      sbgemm_widen(src + j * ld, dest + j * rows, rows);
++    }
++  }
++  return dest;
++}
++
++/* Leading dimension to report for an expanded operand. BLAS rejects a leading
++ * dimension below 1 even when the matrix is empty. */
++static inline BLASLONG sbgemm_expanded_ld(BLASLONG rows) {
++  return rows > 0 ? rows : 1;
++}
++
++#endif /* SBGEMM_FLOAT_FALLBACK */
++
++#endif /* COMMON_SBFALLBACK_H */
+diff --git a/driver/level3/Makefile b/driver/level3/Makefile
+index 63564acf9..746b4f5e9 100644
+--- a/driver/level3/Makefile
++++ b/driver/level3/Makefile
+@@ -419,13 +419,13 @@ shgemm_tn.$(SUFFIX) : gemm.c level3.c ../../param.h
+ shgemm_tt.$(SUFFIX) : gemm.c level3.c ../../param.h
+ 	$(CC) $(CFLAGS) $(BLOCKS) -c -DHFLOAT16 -UDOUBLE -UCOMPLEX -DTT $< -o $(@F)
+ 
+-sbgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
++sbgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
+ 	$(CC) $(CFLAGS) $(BLOCKS) -c -DBFLOAT16 -UDOUBLE -UCOMPLEX $< -o $(@F)
+ 
+-sgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
++sgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
+ 	$(CC) $(CFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX $< -o $(@F)
+ 
+-dgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
++dgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
+ 	$(CC) $(CFLAGS) $(BLOCKS) -c -DDOUBLE -UCOMPLEX $< -o $(@F)
+ 
+ sgemm_nn.$(SUFFIX) : gemm.c level3.c ../../param.h
+@@ -2859,13 +2859,13 @@ shgemm_tn.$(PSUFFIX) : gemm.c level3.c ../../param.h
+ shgemm_tt.$(PSUFFIX) : gemm.c level3.c ../../param.h
+ 	$(CC) $(PFLAGS) $(BLOCKS) -c -DHFLOAT16 -UDOUBLE -UCOMPLEX -DTT $< -o $(@F)
+ 
+-sbgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
++sbgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
+ 	$(CC) $(PFLAGS) $(BLOCKS) -c -DBFLOAT16 -UDOUBLE -UCOMPLEX $< -o $(@F)
+ 
+-sgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
++sgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
+ 	$(CC) $(PFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX $< -o $(@F)
+ 
+-dgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
++dgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
+ 	$(CC) $(PFLAGS) $(BLOCKS) -c -DDOUBLE -UCOMPLEX $< -o $(@F)
+ 
+ sgemm_nn.$(PSUFFIX) : gemm.c level3.c ../../param.h
+diff --git a/driver/level3/gemm_packed.c b/driver/level3/gemm_packed.c
+index b459a9289..ffcdd5f47 100644
+--- a/driver/level3/gemm_packed.c
++++ b/driver/level3/gemm_packed.c
+@@ -63,6 +63,7 @@
+ #include <stddef.h>
+ #include <string.h>
+ #include "common.h"
++#include "common_sbfallback.h"
+ 
+ #if defined(COMPLEX) || defined(XDOUBLE) || defined(HFLOAT16) || defined(BGEMM)
+ #error "gemm_packed.c supports SGEMM, DGEMM, and SBGEMM only"
+@@ -76,11 +77,11 @@
+ #define GEMM_PACKED_COMPUTE_FN GEMM_PACKED_CONCAT(CNAME, _compute)
+ 
+ #if defined(BFLOAT16)
+-#define GEMM_PACKED_TYPE_TAG 0x00007362u /* "sb" */
++#define GEMM_PACKED_TYPE_TAG GEMM_PACKED_TAG_SB
+ #elif defined(DOUBLE)
+-#define GEMM_PACKED_TYPE_TAG 0x00000064u /* "d" */
++#define GEMM_PACKED_TYPE_TAG GEMM_PACKED_TAG_D
+ #else
+-#define GEMM_PACKED_TYPE_TAG 0x00000073u /* "s" */
++#define GEMM_PACKED_TYPE_TAG GEMM_PACKED_TAG_S
+ #endif
+ 
+ #if defined(BFLOAT16)
+@@ -322,6 +323,13 @@ size_t GEMM_PACKED_SIZE_FN(BLASLONG extent, BLASLONG k) {
+   size_t a_bytes, b_bytes, total;
+ 
+   if (extent < 0 || k < 0) return 0;
++
++#ifdef SBGEMM_FLOAT_FALLBACK
++  /* The buffer then holds the float panels that the SGEMM copy routines
++   * write, so it is the SGEMM layout that has to fit. */
++  if (sbgemm_float_fallback()) return sgemm_packed_size(extent, k);
++#endif
++
+   if (!gemm_packed_data_bytes(GEMM_PACKED_IDENTIFIER_A, extent, k, &a_bytes)) return 0;
+   if (!gemm_packed_data_bytes(GEMM_PACKED_IDENTIFIER_B, extent, k, &b_bytes)) return 0;
+   if (!gemm_packed_total_bytes(a_bytes > b_bytes ? a_bytes : b_bytes, &total)) return 0;
+@@ -340,9 +348,10 @@ size_t GEMM_PACKED_SIZE_FN(BLASLONG extent, BLASLONG k) {
+  *   dest        buffer of at least ?gemm_packed_size() bytes
+  *
+  * Returns 0 on success, 1 for an invalid identifier, 2 when the packed size
+- * does not fit (so that ?gemm_packed_size() had returned 0), and 3 when the
++ * does not fit (so that ?gemm_packed_size() had returned 0), 3 when the
+  * panels written disagree with the size computed in closed form, which would
+- * be an internal error.
++ * be an internal error, and 4 when the float expansion of the single
++ * precision SBGEMM fallback could not be allocated.
+  */
+ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
+                         FLOAT alpha, IFLOAT *src, BLASLONG ld, void *dest) {
+@@ -353,6 +362,40 @@ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASL
+   BLASLONG ls, is, js, jjs, min_l, min_i, min_j, min_jj, pad_l;
+ 
+   if (identifier != GEMM_PACKED_IDENTIFIER_A && identifier != GEMM_PACKED_IDENTIFIER_B) return 1;
++
++#ifdef SBGEMM_FLOAT_FALLBACK
++  /* Pack the float expansion with the SGEMM copy routines, so that the panels
++   * match the kernels ?gemm_packed_compute() will run, see
++   * common_sbfallback.h. The header is then written by sgemm_packed_pack and
++   * carries the SGEMM type tag and blocking parameters. */
++  if (sbgemm_float_fallback()) {
++    BLASLONG rows = (identifier == GEMM_PACKED_IDENTIFIER_A) ? (trans ? k : m) : (trans ? n : k);
++    BLASLONG cols = (identifier == GEMM_PACKED_IDENTIFIER_A) ? (trans ? m : k) : (trans ? k : n);
++    float *src_float = sbgemm_expand_to_float(src, rows, cols, ld);
++    int fallback_status;
++
++    if (src_float == NULL) {
++      /* Leave no valid header behind, so that a later ?gemm_packed_compute()
++       * rejects the buffer instead of reading stale panels. */
++      memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
++      openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
++      return 4;
++    }
++
++    fallback_status = sgemm_packed_pack(identifier, trans, m, n, k, alpha, src_float,
++                                        sbgemm_expanded_ld(rows), dest);
++    free(src_float);
++    if (fallback_status == 0) {
++      /* The panels are SGEMM's, but the buffer is an SBGEMM one and only
++       * cblas_sbgemm_compute may consume it. Stamp our tag over the one
++       * sgemm_packed_pack wrote; the compute side asks for it by name. */
++      uint32_t tag = GEMM_PACKED_TYPE_TAG;
++      memcpy((char *)dest + offsetof(gemm_packed_header_t, type_tag), &tag, sizeof(tag));
++    }
++    return fallback_status;
++  }
++#endif
++
+   if (!gemm_packed_data_bytes(identifier, identifier == GEMM_PACKED_IDENTIFIER_A ? m : n, k, &expected) ||
+       !gemm_packed_total_bytes(expected, &total)) return 2;
+ 
+@@ -428,11 +471,12 @@ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASL
+  * operand usable for the product described by m, n, k with the expected
+  * identifier. */
+ static int gemm_packed_header_check(const gemm_packed_header_t *header, const void *buffer,
+-                                    int identifier, BLASLONG m, BLASLONG n, BLASLONG k) {
++                                    int identifier, BLASLONG m, BLASLONG n, BLASLONG k,
++                                    unsigned int type_tag) {
+   size_t expected;
+ 
+   if (header->magic != GEMM_PACKED_MAGIC) return 1;
+-  if (header->type_tag != GEMM_PACKED_TYPE_TAG) return 1;
++  if (header->type_tag != type_tag) return 1;
+   if (header->version != GEMM_PACKED_VERSION) return 1;
+   if (header->identifier != (uint32_t)identifier) return 1;
+   if (header->k != k) return 1;
+@@ -479,9 +523,14 @@ static int gemm_packed_header_check(const gemm_packed_header_t *header, const vo
+  * Returns 0 on success. Otherwise bit 0 is set when the packed A buffer is not
+  * usable and bit 1 when the packed B buffer is not usable; both headers are
+  * checked before returning. Nothing is written to C on failure.
++ *
++ * When the single precision SBGEMM fallback is active the operands that are
++ * not packed are expanded to float and the whole product is handed to
++ * sgemm_packed_compute. An expansion that cannot be allocated leaves C
++ * untouched and reports success, as an unavailable bfloat16 kernel does.
+  */
+ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
+-                           XFLOAT *sa, XFLOAT *sb) {
++                           XFLOAT *sa, XFLOAT *sb, unsigned int type_tag) {
+   BLASLONG m = args->m, n = args->n, k = args->k;
+   BLASLONG lda = args->lda, ldb = args->ldb, ldc = args->ldc;
+   IFLOAT *a = (IFLOAT *)args->a;
+@@ -497,13 +546,60 @@ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packe
+   BLASLONG ls, is, js, jjs, min_l, min_i, min_j, min_jj, pad_l, l1stride;
+   int status = 0;
+ 
++#ifdef SBGEMM_FLOAT_FALLBACK
++  /* The packed buffers were written by sgemm_packed_pack, so their headers
++   * are the SGEMM ones and only sgemm_packed_compute may validate them. The
++   * scratch was split for float panels by interface/gemm_compute.c. */
++  if (sbgemm_float_fallback()) {
++    blas_arg_t float_args = *args;
++    float *a_float = NULL;
++    float *b_float = NULL;
++    int fallback_status;
++    /* sgemm_packed_compute applies beta and returns without reading either
++     * operand once k or alpha is zero, and a packed alpha can only make the
++     * product more zero, so the expansion is skipped for those. k itself has
++     * to stay as it is, because the header check compares it. */
++    int product_is_empty = (k == 0) || (alpha == ZERO);
++
++    if (!a_packed) {
++      BLASLONG rows = transa ? k : m;
++      BLASLONG cols = product_is_empty ? 0 : (transa ? m : k);
++      a_float = sbgemm_expand_to_float(a, rows, cols, lda);
++      if (a_float == NULL) {
++        openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
++        return 0;
++      }
++      float_args.a = (void *)a_float;
++      float_args.lda = sbgemm_expanded_ld(rows);
++    }
++    if (!b_packed) {
++      BLASLONG rows = transb ? n : k;
++      BLASLONG cols = product_is_empty ? 0 : (transb ? k : n);
++      b_float = sbgemm_expand_to_float(b, rows, cols, ldb);
++      if (b_float == NULL) {
++        free(a_float);
++        openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
++        return 0;
++      }
++      float_args.b = (void *)b_float;
++      float_args.ldb = sbgemm_expanded_ld(rows);
++    }
++
++    fallback_status = sgemm_packed_compute(&float_args, transa, transb, a_packed, b_packed,
++                                           (float *)sa, (float *)sb, type_tag);
++    free(a_float);
++    free(b_float);
++    return fallback_status;
++  }
++#endif
++
+   if (a_packed) {
+     memcpy(&header_a, args->a, sizeof(header_a));
+-    if (gemm_packed_header_check(&header_a, args->a, GEMM_PACKED_IDENTIFIER_A, m, n, k)) status |= 1;
++    if (gemm_packed_header_check(&header_a, args->a, GEMM_PACKED_IDENTIFIER_A, m, n, k, type_tag)) status |= 1;
+   }
+   if (b_packed) {
+     memcpy(&header_b, args->b, sizeof(header_b));
+-    if (gemm_packed_header_check(&header_b, args->b, GEMM_PACKED_IDENTIFIER_B, m, n, k)) status |= 2;
++    if (gemm_packed_header_check(&header_b, args->b, GEMM_PACKED_IDENTIFIER_B, m, n, k, type_tag)) status |= 2;
+   }
+   if (status) return status;
+ 
+diff --git a/interface/Makefile b/interface/Makefile
+index 4729d22fa..def1e549c 100644
+--- a/interface/Makefile
++++ b/interface/Makefile
+@@ -1371,9 +1371,9 @@ xhpr2.$(SUFFIX) xhpr2.$(PSUFFIX) : zhpr2.c
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+ 
+ ifeq ($(BUILD_BFLOAT16),1)
+-bgemm.$(SUFFIX) bgemm.$(PSUFFIX) : gemm.c ../param.h
++bgemm.$(SUFFIX) bgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+-sbgemm.$(SUFFIX) sbgemm.$(PSUFFIX) : gemm.c ../param.h
++sbgemm.$(SUFFIX) sbgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+ sbgemmt.$(SUFFIX) sbgemmt.$(PSUFFIX) : sbgemmt.c ../param.h
+ 	$(CC) -c $(CFLAGS) -URNAME $< -o $(@F)
+@@ -1382,26 +1382,26 @@ sbgemmtr.$(SUFFIX) sbgemmtr.$(PSUFFIX) : sbgemmt.c ../param.h
+ endif
+ 
+ ifeq ($(BUILD_HFLOAT16),1)
+-shgemm.$(SUFFIX) shgemm.$(PSUFFIX) : gemm.c ../param.h
++shgemm.$(SUFFIX) shgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+ endif
+ 
+-sgemm.$(SUFFIX) sgemm.$(PSUFFIX) : gemm.c ../param.h
++sgemm.$(SUFFIX) sgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+ 
+-dgemm.$(SUFFIX) dgemm.$(PSUFFIX) : gemm.c ../param.h
++dgemm.$(SUFFIX) dgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+ 
+-qgemm.$(SUFFIX) qgemm.$(PSUFFIX) : gemm.c ../param.h
++qgemm.$(SUFFIX) qgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+ 
+-cgemm.$(SUFFIX) cgemm.$(PSUFFIX) : gemm.c ../param.h
++cgemm.$(SUFFIX) cgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+ 
+-zgemm.$(SUFFIX) zgemm.$(PSUFFIX) : gemm.c ../param.h
++zgemm.$(SUFFIX) zgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+ 
+-xgemm.$(SUFFIX) xgemm.$(PSUFFIX) : gemm.c ../param.h
++xgemm.$(SUFFIX) xgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -c $(CFLAGS) $< -o $(@F)
+ 
+ sgemmt.$(SUFFIX) sgemmt.$(PSUFFIX) : gemmt.c ../param.h
+@@ -2046,44 +2046,44 @@ cblas_chemv.$(SUFFIX) cblas_chemv.$(PSUFFIX) : zhemv.c
+ cblas_zhemv.$(SUFFIX) cblas_zhemv.$(PSUFFIX) : zhemv.c
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+-cblas_sgemm.$(SUFFIX) cblas_sgemm.$(PSUFFIX) : gemm.c ../param.h
++cblas_sgemm.$(SUFFIX) cblas_sgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+-cblas_sgemm_pack.$(SUFFIX) cblas_sgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h
++cblas_sgemm_pack.$(SUFFIX) cblas_sgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+-cblas_sgemm_compute.$(SUFFIX) cblas_sgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h
++cblas_sgemm_compute.$(SUFFIX) cblas_sgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+ ifeq ($(BUILD_BFLOAT16),1)
+-cblas_bgemm.$(SUFFIX) cblas_bgemm.$(PSUFFIX) : gemm.c ../param.h
++cblas_bgemm.$(SUFFIX) cblas_bgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -DBGEMM -c $(CFLAGS) $< -o $(@F)
+-cblas_sbgemm.$(SUFFIX) cblas_sbgemm.$(PSUFFIX) : gemm.c ../param.h
++cblas_sbgemm.$(SUFFIX) cblas_sbgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+-cblas_sbgemm_pack.$(SUFFIX) cblas_sbgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h
++cblas_sbgemm_pack.$(SUFFIX) cblas_sbgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+-cblas_sbgemm_compute.$(SUFFIX) cblas_sbgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h
++cblas_sbgemm_compute.$(SUFFIX) cblas_sbgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ endif
+ 
+ ifeq ($(BUILD_HFLOAT16),1)
+-cblas_shgemm.$(SUFFIX) cblas_shgemm.$(PSUFFIX) : gemm.c ../param.h
++cblas_shgemm.$(SUFFIX) cblas_shgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ endif
+ 
+-cblas_dgemm.$(SUFFIX) cblas_dgemm.$(PSUFFIX) : gemm.c ../param.h
++cblas_dgemm.$(SUFFIX) cblas_dgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+-cblas_dgemm_pack.$(SUFFIX) cblas_dgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h
++cblas_dgemm_pack.$(SUFFIX) cblas_dgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+-cblas_dgemm_compute.$(SUFFIX) cblas_dgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h
++cblas_dgemm_compute.$(SUFFIX) cblas_dgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+-cblas_cgemm.$(SUFFIX) cblas_cgemm.$(PSUFFIX) : gemm.c ../param.h
++cblas_cgemm.$(SUFFIX) cblas_cgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+-cblas_zgemm.$(SUFFIX) cblas_zgemm.$(PSUFFIX) : gemm.c ../param.h
++cblas_zgemm.$(SUFFIX) cblas_zgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
+ 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
+ 
+ cblas_sgemmt.$(SUFFIX) cblas_sgemmt.$(PSUFFIX) : gemmt.c ../param.h
+diff --git a/interface/gemm.c b/interface/gemm.c
+index 79b076164..9b1e18863 100644
+--- a/interface/gemm.c
++++ b/interface/gemm.c
+@@ -41,6 +41,7 @@
+ #include <stdlib.h>
+ #include <stdbool.h>
+ #include "common.h"
++#include "common_sbfallback.h"
+ #ifdef FUNCTION_PROFILE
+ #include "functable.h"
+ #endif
+@@ -598,6 +599,56 @@ else
+ 	 args.m, args.n, args.k, args.lda, args.ldb, args.ldc);
+ #endif
+ 
++#ifdef SBGEMM_FLOAT_FALLBACK
++  /* Cores without a bfloat16 GEMM kernel compute the product with the SGEMM
++   * kernels instead, see common_sbfallback.h. */
++  if (sbgemm_float_fallback()) {
++    float sgemm_alpha = *(FLOAT *)args.alpha;
++    float sgemm_beta  = *(FLOAT *)args.beta;
++    /* level3.c applies beta and returns without ever reading A or B when k or
++     * alpha is zero. Expanding them would be the dominant cost of a call that
++     * only scales C, so the operands are left out and k is passed as zero,
++     * which is the case the driver provably does not read. */
++    int product_is_empty = (args.k == 0) || (sgemm_alpha == ZERO);
++    BLASLONG a_rows = transa ? args.k : args.m;
++    BLASLONG b_rows = transb ? args.n : args.k;
++    BLASLONG a_cols = product_is_empty ? 0 : (transa ? args.m : args.k);
++    BLASLONG b_cols = product_is_empty ? 0 : (transb ? args.k : args.n);
++    float *a_float = sbgemm_expand_to_float((bfloat16 *)args.a, a_rows, a_cols, args.lda);
++    float *b_float = (a_float != NULL)
++                         ? sbgemm_expand_to_float((bfloat16 *)args.b, b_rows, b_cols, args.ldb)
++                         : NULL;
++
++    if (a_float == NULL || b_float == NULL) {
++      free(a_float);
++      free(b_float);
++      /* C is left untouched, as it is when the Sapphire Rapids kernels cannot
++       * obtain AMX tile permission above. */
++      openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
++      return;
++    }
++
++    {
++      char sgemm_transa = transa ? 'T' : 'N';
++      char sgemm_transb = transb ? 'T' : 'N';
++      blasint sgemm_m   = (blasint)args.m;
++      blasint sgemm_n   = (blasint)args.n;
++      blasint sgemm_k   = product_is_empty ? 0 : (blasint)args.k;
++      blasint sgemm_lda = (blasint)sbgemm_expanded_ld(a_rows);
++      blasint sgemm_ldb = (blasint)sbgemm_expanded_ld(b_rows);
++      blasint sgemm_ldc = (blasint)args.ldc;
++
++      BLASFUNC(sgemm)(&sgemm_transa, &sgemm_transb, &sgemm_m, &sgemm_n, &sgemm_k,
++                      &sgemm_alpha, a_float, &sgemm_lda, b_float, &sgemm_ldb,
++                      &sgemm_beta, (float *)args.c, &sgemm_ldc);
++    }
++
++    free(a_float);
++    free(b_float);
++    return;
++  }
++#endif
++
+ #if (!defined(BFLOAT16) || (!defined(BGEMM) && defined(SBGEMM_GEMV_FORWARD)) || (defined(BGEMM) && defined(BGEMM_GEMV_FORWARD)))
+ #define BFLOAT16_GEMM_GEMV_FORWARD 1
+ #else
+diff --git a/interface/gemm_compute.c b/interface/gemm_compute.c
+index 2e43db193..1039564d2 100644
+--- a/interface/gemm_compute.c
++++ b/interface/gemm_compute.c
+@@ -54,6 +54,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include "common.h"
++#include "common_sbfallback.h"
+ #include "gemm_packed_common.h"
+ 
+ #define ERROR_NAME GEMM_PACKED_PREFIX "_COMPUTE "
+@@ -160,10 +161,19 @@ void CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, bl
+   sa = (XFLOAT *)((BLASLONG)buffer + (WhereAmI() & 0xf) * GEMM_OFFSET_A);
+ #else
+   sa = (XFLOAT *)((BLASLONG)buffer + GEMM_OFFSET_A);
++#endif
++#ifdef SBGEMM_FLOAT_FALLBACK
++  /* The fallback runs the SGEMM kernels on float panels, so the scratch is
++   * divided where a regular SGEMM divides it, not where SBGEMM would. */
++  if (sbgemm_float_fallback()) {
++    sb = (XFLOAT *)(((BLASLONG)sa + (((BLASLONG)SGEMM_P * (BLASLONG)SGEMM_Q * (BLASLONG)sizeof(float)
++                                      + GEMM_ALIGN) & ~GEMM_ALIGN)) + GEMM_OFFSET_B);
++  } else
+ #endif
+   sb = (XFLOAT *)(((BLASLONG)sa + ((GEMM_P * GEMM_Q * COMPSIZE * SIZE + GEMM_ALIGN) & ~GEMM_ALIGN)) + GEMM_OFFSET_B);
+ 
+-  status = GEMM_PACKED_COMPUTE(&args, internal_ta, internal_tb, internal_a_packed, internal_b_packed, sa, sb);
++  status = GEMM_PACKED_COMPUTE(&args, internal_ta, internal_tb, internal_a_packed, internal_b_packed,
++                               sa, sb, GEMM_PACKED_TAG);
+ 
+   blas_memory_free(buffer);
+ 
+diff --git a/interface/gemm_pack.c b/interface/gemm_pack.c
+index 927bb86cd..2ddeb84ce 100644
+--- a/interface/gemm_pack.c
++++ b/interface/gemm_pack.c
+@@ -144,7 +144,9 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_IDENTIFIER identifier, enum CBLAS_
+                             alpha, src, (BLASLONG)ld, (void *)dest);
+   if (status != 0) {
+     /* 2: the packed size does not fit, so cblas_?gemm_pack_get_size had
+-     * returned 0 for these dimensions; 3: internal layout inconsistency. */
++     * returned 0 for these dimensions; 3: internal layout inconsistency;
++     * 4: the float expansion of the single precision SBGEMM fallback could
++     * not be allocated. */
+     info = 0;
+     BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
+   }
+diff --git a/interface/gemm_packed_common.h b/interface/gemm_packed_common.h
+index 93404abbb..d92c018cc 100644
+--- a/interface/gemm_packed_common.h
++++ b/interface/gemm_packed_common.h
+@@ -55,16 +55,19 @@
+ #define GEMM_PACKED_PACK    sbgemm_packed_pack
+ #define GEMM_PACKED_COMPUTE sbgemm_packed_compute
+ #define GEMM_PACKED_PREFIX  "SBGEMM"
++#define GEMM_PACKED_TAG     GEMM_PACKED_TAG_SB
+ #elif defined(DOUBLE)
+ #define GEMM_PACKED_SIZE    dgemm_packed_size
+ #define GEMM_PACKED_PACK    dgemm_packed_pack
+ #define GEMM_PACKED_COMPUTE dgemm_packed_compute
+ #define GEMM_PACKED_PREFIX  "DGEMM"
++#define GEMM_PACKED_TAG     GEMM_PACKED_TAG_D
+ #else
+ #define GEMM_PACKED_SIZE    sgemm_packed_size
+ #define GEMM_PACKED_PACK    sgemm_packed_pack
+ #define GEMM_PACKED_COMPUTE sgemm_packed_compute
+ #define GEMM_PACKED_PREFIX  "SGEMM"
++#define GEMM_PACKED_TAG     GEMM_PACKED_TAG_S
+ #endif
+ 
+ /* Maps a CBLAS transpose value to the 0/1 code of the driver. Real types treat

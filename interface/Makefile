@@ -1371,9 +1371,9 @@ xhpr2.$(SUFFIX) xhpr2.$(PSUFFIX) : zhpr2.c
 	$(CC) -c $(CFLAGS) $< -o $(@F)
 
 ifeq ($(BUILD_BFLOAT16),1)
-bgemm.$(SUFFIX) bgemm.$(PSUFFIX) : gemm.c ../param.h
+bgemm.$(SUFFIX) bgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -c $(CFLAGS) $< -o $(@F)
-sbgemm.$(SUFFIX) sbgemm.$(PSUFFIX) : gemm.c ../param.h
+sbgemm.$(SUFFIX) sbgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -c $(CFLAGS) $< -o $(@F)
 sbgemmt.$(SUFFIX) sbgemmt.$(PSUFFIX) : sbgemmt.c ../param.h
 	$(CC) -c $(CFLAGS) -URNAME $< -o $(@F)
@@ -1382,26 +1382,26 @@ sbgemmtr.$(SUFFIX) sbgemmtr.$(PSUFFIX) : sbgemmt.c ../param.h
 endif
 
 ifeq ($(BUILD_HFLOAT16),1)
-shgemm.$(SUFFIX) shgemm.$(PSUFFIX) : gemm.c ../param.h
+shgemm.$(SUFFIX) shgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -c $(CFLAGS) $< -o $(@F)
 endif
 
-sgemm.$(SUFFIX) sgemm.$(PSUFFIX) : gemm.c ../param.h
+sgemm.$(SUFFIX) sgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -c $(CFLAGS) $< -o $(@F)
 
-dgemm.$(SUFFIX) dgemm.$(PSUFFIX) : gemm.c ../param.h
+dgemm.$(SUFFIX) dgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -c $(CFLAGS) $< -o $(@F)
 
-qgemm.$(SUFFIX) qgemm.$(PSUFFIX) : gemm.c ../param.h
+qgemm.$(SUFFIX) qgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -c $(CFLAGS) $< -o $(@F)
 
-cgemm.$(SUFFIX) cgemm.$(PSUFFIX) : gemm.c ../param.h
+cgemm.$(SUFFIX) cgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -c $(CFLAGS) $< -o $(@F)
 
-zgemm.$(SUFFIX) zgemm.$(PSUFFIX) : gemm.c ../param.h
+zgemm.$(SUFFIX) zgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -c $(CFLAGS) $< -o $(@F)
 
-xgemm.$(SUFFIX) xgemm.$(PSUFFIX) : gemm.c ../param.h
+xgemm.$(SUFFIX) xgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -c $(CFLAGS) $< -o $(@F)
 
 sgemmt.$(SUFFIX) sgemmt.$(PSUFFIX) : gemmt.c ../param.h
@@ -2046,44 +2046,44 @@ cblas_chemv.$(SUFFIX) cblas_chemv.$(PSUFFIX) : zhemv.c
 cblas_zhemv.$(SUFFIX) cblas_zhemv.$(PSUFFIX) : zhemv.c
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 
-cblas_sgemm.$(SUFFIX) cblas_sgemm.$(PSUFFIX) : gemm.c ../param.h
+cblas_sgemm.$(SUFFIX) cblas_sgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 
-cblas_sgemm_pack.$(SUFFIX) cblas_sgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h
+cblas_sgemm_pack.$(SUFFIX) cblas_sgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 
-cblas_sgemm_compute.$(SUFFIX) cblas_sgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h
+cblas_sgemm_compute.$(SUFFIX) cblas_sgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 
 ifeq ($(BUILD_BFLOAT16),1)
-cblas_bgemm.$(SUFFIX) cblas_bgemm.$(PSUFFIX) : gemm.c ../param.h
+cblas_bgemm.$(SUFFIX) cblas_bgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -DBGEMM -c $(CFLAGS) $< -o $(@F)
-cblas_sbgemm.$(SUFFIX) cblas_sbgemm.$(PSUFFIX) : gemm.c ../param.h
+cblas_sbgemm.$(SUFFIX) cblas_sbgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
-cblas_sbgemm_pack.$(SUFFIX) cblas_sbgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h
+cblas_sbgemm_pack.$(SUFFIX) cblas_sbgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
-cblas_sbgemm_compute.$(SUFFIX) cblas_sbgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h
+cblas_sbgemm_compute.$(SUFFIX) cblas_sbgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 endif
 
 ifeq ($(BUILD_HFLOAT16),1)
-cblas_shgemm.$(SUFFIX) cblas_shgemm.$(PSUFFIX) : gemm.c ../param.h
+cblas_shgemm.$(SUFFIX) cblas_shgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 endif
 
-cblas_dgemm.$(SUFFIX) cblas_dgemm.$(PSUFFIX) : gemm.c ../param.h
+cblas_dgemm.$(SUFFIX) cblas_dgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 
-cblas_dgemm_pack.$(SUFFIX) cblas_dgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h
+cblas_dgemm_pack.$(SUFFIX) cblas_dgemm_pack.$(PSUFFIX) : gemm_pack.c gemm_packed_common.h ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 
-cblas_dgemm_compute.$(SUFFIX) cblas_dgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h
+cblas_dgemm_compute.$(SUFFIX) cblas_dgemm_compute.$(PSUFFIX) : gemm_compute.c gemm_packed_common.h ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 
-cblas_cgemm.$(SUFFIX) cblas_cgemm.$(PSUFFIX) : gemm.c ../param.h
+cblas_cgemm.$(SUFFIX) cblas_cgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 
-cblas_zgemm.$(SUFFIX) cblas_zgemm.$(PSUFFIX) : gemm.c ../param.h
+cblas_zgemm.$(SUFFIX) cblas_zgemm.$(PSUFFIX) : gemm.c ../param.h ../common_sbfallback.h
 	$(CC) -DCBLAS -c $(CFLAGS) $< -o $(@F)
 
 cblas_sgemmt.$(SUFFIX) cblas_sgemmt.$(PSUFFIX) : gemmt.c ../param.h

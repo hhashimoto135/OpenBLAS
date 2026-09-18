@@ -63,6 +63,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "common.h"
+#include "common_sbfallback.h"
 
 #if defined(COMPLEX) || defined(XDOUBLE) || defined(HFLOAT16) || defined(BGEMM)
 #error "gemm_packed.c supports SGEMM, DGEMM, and SBGEMM only"
@@ -76,11 +77,11 @@
 #define GEMM_PACKED_COMPUTE_FN GEMM_PACKED_CONCAT(CNAME, _compute)
 
 #if defined(BFLOAT16)
-#define GEMM_PACKED_TYPE_TAG 0x00007362u /* "sb" */
+#define GEMM_PACKED_TYPE_TAG GEMM_PACKED_TAG_SB
 #elif defined(DOUBLE)
-#define GEMM_PACKED_TYPE_TAG 0x00000064u /* "d" */
+#define GEMM_PACKED_TYPE_TAG GEMM_PACKED_TAG_D
 #else
-#define GEMM_PACKED_TYPE_TAG 0x00000073u /* "s" */
+#define GEMM_PACKED_TYPE_TAG GEMM_PACKED_TAG_S
 #endif
 
 #if defined(BFLOAT16)
@@ -322,6 +323,13 @@ size_t GEMM_PACKED_SIZE_FN(BLASLONG extent, BLASLONG k) {
   size_t a_bytes, b_bytes, total;
 
   if (extent < 0 || k < 0) return 0;
+
+#ifdef SBGEMM_FLOAT_FALLBACK
+  /* The buffer then holds the float panels that the SGEMM copy routines
+   * write, so it is the SGEMM layout that has to fit. */
+  if (sbgemm_float_fallback()) return sgemm_packed_size(extent, k);
+#endif
+
   if (!gemm_packed_data_bytes(GEMM_PACKED_IDENTIFIER_A, extent, k, &a_bytes)) return 0;
   if (!gemm_packed_data_bytes(GEMM_PACKED_IDENTIFIER_B, extent, k, &b_bytes)) return 0;
   if (!gemm_packed_total_bytes(a_bytes > b_bytes ? a_bytes : b_bytes, &total)) return 0;
@@ -340,9 +348,10 @@ size_t GEMM_PACKED_SIZE_FN(BLASLONG extent, BLASLONG k) {
  *   dest        buffer of at least ?gemm_packed_size() bytes
  *
  * Returns 0 on success, 1 for an invalid identifier, 2 when the packed size
- * does not fit (so that ?gemm_packed_size() had returned 0), and 3 when the
+ * does not fit (so that ?gemm_packed_size() had returned 0), 3 when the
  * panels written disagree with the size computed in closed form, which would
- * be an internal error.
+ * be an internal error, and 4 when the float expansion of the single
+ * precision SBGEMM fallback could not be allocated.
  */
 int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
                         FLOAT alpha, IFLOAT *src, BLASLONG ld, void *dest) {
@@ -353,6 +362,40 @@ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASL
   BLASLONG ls, is, js, jjs, min_l, min_i, min_j, min_jj, pad_l;
 
   if (identifier != GEMM_PACKED_IDENTIFIER_A && identifier != GEMM_PACKED_IDENTIFIER_B) return 1;
+
+#ifdef SBGEMM_FLOAT_FALLBACK
+  /* Pack the float expansion with the SGEMM copy routines, so that the panels
+   * match the kernels ?gemm_packed_compute() will run, see
+   * common_sbfallback.h. The header is then written by sgemm_packed_pack and
+   * carries the SGEMM type tag and blocking parameters. */
+  if (sbgemm_float_fallback()) {
+    BLASLONG rows = (identifier == GEMM_PACKED_IDENTIFIER_A) ? (trans ? k : m) : (trans ? n : k);
+    BLASLONG cols = (identifier == GEMM_PACKED_IDENTIFIER_A) ? (trans ? m : k) : (trans ? k : n);
+    float *src_float = sbgemm_expand_to_float(src, rows, cols, ld);
+    int fallback_status;
+
+    if (src_float == NULL) {
+      /* Leave no valid header behind, so that a later ?gemm_packed_compute()
+       * rejects the buffer instead of reading stale panels. */
+      memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
+      openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
+      return 4;
+    }
+
+    fallback_status = sgemm_packed_pack(identifier, trans, m, n, k, alpha, src_float,
+                                        sbgemm_expanded_ld(rows), dest);
+    free(src_float);
+    if (fallback_status == 0) {
+      /* The panels are SGEMM's, but the buffer is an SBGEMM one and only
+       * cblas_sbgemm_compute may consume it. Stamp our tag over the one
+       * sgemm_packed_pack wrote; the compute side asks for it by name. */
+      uint32_t tag = GEMM_PACKED_TYPE_TAG;
+      memcpy((char *)dest + offsetof(gemm_packed_header_t, type_tag), &tag, sizeof(tag));
+    }
+    return fallback_status;
+  }
+#endif
+
   if (!gemm_packed_data_bytes(identifier, identifier == GEMM_PACKED_IDENTIFIER_A ? m : n, k, &expected) ||
       !gemm_packed_total_bytes(expected, &total)) return 2;
 
@@ -428,11 +471,12 @@ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASL
  * operand usable for the product described by m, n, k with the expected
  * identifier. */
 static int gemm_packed_header_check(const gemm_packed_header_t *header, const void *buffer,
-                                    int identifier, BLASLONG m, BLASLONG n, BLASLONG k) {
+                                    int identifier, BLASLONG m, BLASLONG n, BLASLONG k,
+                                    unsigned int type_tag) {
   size_t expected;
 
   if (header->magic != GEMM_PACKED_MAGIC) return 1;
-  if (header->type_tag != GEMM_PACKED_TYPE_TAG) return 1;
+  if (header->type_tag != type_tag) return 1;
   if (header->version != GEMM_PACKED_VERSION) return 1;
   if (header->identifier != (uint32_t)identifier) return 1;
   if (header->k != k) return 1;
@@ -479,9 +523,14 @@ static int gemm_packed_header_check(const gemm_packed_header_t *header, const vo
  * Returns 0 on success. Otherwise bit 0 is set when the packed A buffer is not
  * usable and bit 1 when the packed B buffer is not usable; both headers are
  * checked before returning. Nothing is written to C on failure.
+ *
+ * When the single precision SBGEMM fallback is active the operands that are
+ * not packed are expanded to float and the whole product is handed to
+ * sgemm_packed_compute. An expansion that cannot be allocated leaves C
+ * untouched and reports success, as an unavailable bfloat16 kernel does.
  */
 int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
-                           XFLOAT *sa, XFLOAT *sb) {
+                           XFLOAT *sa, XFLOAT *sb, unsigned int type_tag) {
   BLASLONG m = args->m, n = args->n, k = args->k;
   BLASLONG lda = args->lda, ldb = args->ldb, ldc = args->ldc;
   IFLOAT *a = (IFLOAT *)args->a;
@@ -497,13 +546,60 @@ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packe
   BLASLONG ls, is, js, jjs, min_l, min_i, min_j, min_jj, pad_l, l1stride;
   int status = 0;
 
+#ifdef SBGEMM_FLOAT_FALLBACK
+  /* The packed buffers were written by sgemm_packed_pack, so their headers
+   * are the SGEMM ones and only sgemm_packed_compute may validate them. The
+   * scratch was split for float panels by interface/gemm_compute.c. */
+  if (sbgemm_float_fallback()) {
+    blas_arg_t float_args = *args;
+    float *a_float = NULL;
+    float *b_float = NULL;
+    int fallback_status;
+    /* sgemm_packed_compute applies beta and returns without reading either
+     * operand once k or alpha is zero, and a packed alpha can only make the
+     * product more zero, so the expansion is skipped for those. k itself has
+     * to stay as it is, because the header check compares it. */
+    int product_is_empty = (k == 0) || (alpha == ZERO);
+
+    if (!a_packed) {
+      BLASLONG rows = transa ? k : m;
+      BLASLONG cols = product_is_empty ? 0 : (transa ? m : k);
+      a_float = sbgemm_expand_to_float(a, rows, cols, lda);
+      if (a_float == NULL) {
+        openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
+        return 0;
+      }
+      float_args.a = (void *)a_float;
+      float_args.lda = sbgemm_expanded_ld(rows);
+    }
+    if (!b_packed) {
+      BLASLONG rows = transb ? n : k;
+      BLASLONG cols = product_is_empty ? 0 : (transb ? k : n);
+      b_float = sbgemm_expand_to_float(b, rows, cols, ldb);
+      if (b_float == NULL) {
+        free(a_float);
+        openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
+        return 0;
+      }
+      float_args.b = (void *)b_float;
+      float_args.ldb = sbgemm_expanded_ld(rows);
+    }
+
+    fallback_status = sgemm_packed_compute(&float_args, transa, transb, a_packed, b_packed,
+                                           (float *)sa, (float *)sb, type_tag);
+    free(a_float);
+    free(b_float);
+    return fallback_status;
+  }
+#endif
+
   if (a_packed) {
     memcpy(&header_a, args->a, sizeof(header_a));
-    if (gemm_packed_header_check(&header_a, args->a, GEMM_PACKED_IDENTIFIER_A, m, n, k)) status |= 1;
+    if (gemm_packed_header_check(&header_a, args->a, GEMM_PACKED_IDENTIFIER_A, m, n, k, type_tag)) status |= 1;
   }
   if (b_packed) {
     memcpy(&header_b, args->b, sizeof(header_b));
-    if (gemm_packed_header_check(&header_b, args->b, GEMM_PACKED_IDENTIFIER_B, m, n, k)) status |= 2;
+    if (gemm_packed_header_check(&header_b, args->b, GEMM_PACKED_IDENTIFIER_B, m, n, k, type_tag)) status |= 2;
   }
   if (status) return status;
 

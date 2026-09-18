@@ -41,6 +41,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "common.h"
+#include "common_sbfallback.h"
 #ifdef FUNCTION_PROFILE
 #include "functable.h"
 #endif
@@ -596,6 +597,56 @@ else
 #if 0
   fprintf(stderr, "m = %4d  n = %d  k = %d  lda = %4d  ldb = %4d  ldc = %4d\n",
 	 args.m, args.n, args.k, args.lda, args.ldb, args.ldc);
+#endif
+
+#ifdef SBGEMM_FLOAT_FALLBACK
+  /* Cores without a bfloat16 GEMM kernel compute the product with the SGEMM
+   * kernels instead, see common_sbfallback.h. */
+  if (sbgemm_float_fallback()) {
+    float sgemm_alpha = *(FLOAT *)args.alpha;
+    float sgemm_beta  = *(FLOAT *)args.beta;
+    /* level3.c applies beta and returns without ever reading A or B when k or
+     * alpha is zero. Expanding them would be the dominant cost of a call that
+     * only scales C, so the operands are left out and k is passed as zero,
+     * which is the case the driver provably does not read. */
+    int product_is_empty = (args.k == 0) || (sgemm_alpha == ZERO);
+    BLASLONG a_rows = transa ? args.k : args.m;
+    BLASLONG b_rows = transb ? args.n : args.k;
+    BLASLONG a_cols = product_is_empty ? 0 : (transa ? args.m : args.k);
+    BLASLONG b_cols = product_is_empty ? 0 : (transb ? args.k : args.n);
+    float *a_float = sbgemm_expand_to_float((bfloat16 *)args.a, a_rows, a_cols, args.lda);
+    float *b_float = (a_float != NULL)
+                         ? sbgemm_expand_to_float((bfloat16 *)args.b, b_rows, b_cols, args.ldb)
+                         : NULL;
+
+    if (a_float == NULL || b_float == NULL) {
+      free(a_float);
+      free(b_float);
+      /* C is left untouched, as it is when the Sapphire Rapids kernels cannot
+       * obtain AMX tile permission above. */
+      openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
+      return;
+    }
+
+    {
+      char sgemm_transa = transa ? 'T' : 'N';
+      char sgemm_transb = transb ? 'T' : 'N';
+      blasint sgemm_m   = (blasint)args.m;
+      blasint sgemm_n   = (blasint)args.n;
+      blasint sgemm_k   = product_is_empty ? 0 : (blasint)args.k;
+      blasint sgemm_lda = (blasint)sbgemm_expanded_ld(a_rows);
+      blasint sgemm_ldb = (blasint)sbgemm_expanded_ld(b_rows);
+      blasint sgemm_ldc = (blasint)args.ldc;
+
+      BLASFUNC(sgemm)(&sgemm_transa, &sgemm_transb, &sgemm_m, &sgemm_n, &sgemm_k,
+                      &sgemm_alpha, a_float, &sgemm_lda, b_float, &sgemm_ldb,
+                      &sgemm_beta, (float *)args.c, &sgemm_ldc);
+    }
+
+    free(a_float);
+    free(b_float);
+    return;
+  }
 #endif
 
 #if (!defined(BFLOAT16) || (!defined(BGEMM) && defined(SBGEMM_GEMV_FORWARD)) || (defined(BGEMM) && defined(BGEMM_GEMV_FORWARD)))

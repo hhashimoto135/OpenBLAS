@@ -419,13 +419,13 @@ shgemm_tn.$(SUFFIX) : gemm.c level3.c ../../param.h
 shgemm_tt.$(SUFFIX) : gemm.c level3.c ../../param.h
 	$(CC) $(CFLAGS) $(BLOCKS) -c -DHFLOAT16 -UDOUBLE -UCOMPLEX -DTT $< -o $(@F)
 
-sbgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
+sbgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
 	$(CC) $(CFLAGS) $(BLOCKS) -c -DBFLOAT16 -UDOUBLE -UCOMPLEX $< -o $(@F)
 
-sgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
+sgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
 	$(CC) $(CFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX $< -o $(@F)
 
-dgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h
+dgemm_packed.$(SUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
 	$(CC) $(CFLAGS) $(BLOCKS) -c -DDOUBLE -UCOMPLEX $< -o $(@F)
 
 sgemm_nn.$(SUFFIX) : gemm.c level3.c ../../param.h
@@ -2859,13 +2859,13 @@ shgemm_tn.$(PSUFFIX) : gemm.c level3.c ../../param.h
 shgemm_tt.$(PSUFFIX) : gemm.c level3.c ../../param.h
 	$(CC) $(PFLAGS) $(BLOCKS) -c -DHFLOAT16 -UDOUBLE -UCOMPLEX -DTT $< -o $(@F)
 
-sbgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
+sbgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
 	$(CC) $(PFLAGS) $(BLOCKS) -c -DBFLOAT16 -UDOUBLE -UCOMPLEX $< -o $(@F)
 
-sgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
+sgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
 	$(CC) $(PFLAGS) $(BLOCKS) -c -UDOUBLE -UCOMPLEX $< -o $(@F)
 
-dgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h
+dgemm_packed.$(PSUFFIX) : gemm_packed.c ../../param.h ../../common_sbfallback.h
 	$(CC) $(PFLAGS) $(BLOCKS) -c -DDOUBLE -UCOMPLEX $< -o $(@F)
 
 sgemm_nn.$(PSUFFIX) : gemm.c level3.c ../../param.h
