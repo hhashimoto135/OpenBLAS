@@ -2084,6 +2084,29 @@ static void init_parameter(void) {
   TABLE_NAME.xgemm3m_p = TABLE_NAME.qgemm_p;
 #endif
 
+/* The Zen 4 / Zen 5 blocking below raises GEMM_Q to 512. Only the AVX512
+ * kernels can take that: driver/level3/level3.c caps the k a kernel sees at
+ * GEMM_Q, and the other kernels size a fixed stack packing buffer for their
+ * own GEMM_DEFAULT_Q (kernel/x86_64/dgemm_kernel_4x8_haswell.S L_BUFFER_SIZE
+ * against DGEMM_DEFAULT_Q 128 under WINDOWS_ABI), so they write past their
+ * own frame.
+ *
+ * The gate below only asks what the host CPU is, and the host does not decide
+ * which kernel runs: under DYNAMIC_ARCH OPENBLAS_CORETYPE pins any core on a
+ * Zen 4 / Zen 5 host, and a NO_AVX512 build selects ZEN on its own. Both
+ * segfault, which is upstream OpenBLAS issues #6013, #6021 and #6026.
+ *
+ * Restricting the override to the cores it was tuned for is what upstream
+ * settled on in PR #6027, but that patch compares gotoblas_corename() with
+ * "cooperlake" / "skylakex" / "sapphirerapids" while the x86-64 corename[]
+ * table in driver/others/dynamic.c holds "Cooperlake" / "SkylakeX" /
+ * "SapphireRapids", so the strcmp never matches and the tuning is lost
+ * everywhere. A run time gate on that name would also inherit the loop bound
+ * in force_coretype(), which stops at corename[25] and so can never report
+ * "SapphireRapids". This file is compiled once per core, and only under
+ * DYNAMIC_ARCH, so the whitelist is a compile time question either way.
+ */
+#if defined(COOPERLAKE) || defined(SKYLAKEX) || defined(SAPPHIRERAPIDS)
 {
     int l3_kb = get_l3_size();
     int l2_kb = get_l2_size();
@@ -2093,7 +2116,7 @@ static void init_parameter(void) {
     cpuid(0, &eax, &ebx, &ecx, &edx);
 
     if ((ebx == 0x68747541) && (l3_kb > 0) && (l3_kb % 32768 == 0) && (l2_kb == 1024)) { //Auth AMD
-        
+
         cpuid(7, &cpuid7_eax, &cpuid7_ebx, &cpuid7_ecx, &cpuid7_edx);
         
         if (cpuid7_ebx & (1 << 16)) { // avx512 - Zen 4, 5
@@ -2116,6 +2139,7 @@ static void init_parameter(void) {
         }
     }
 }
+#endif /* COOPERLAKE || SKYLAKEX || SAPPHIRERAPIDS */
 
 #if BUILD_SINGLE == 1
   TABLE_NAME.sgemm_p = ((TABLE_NAME.sgemm_p + SGEMM_DEFAULT_UNROLL_M - 1)/SGEMM_DEFAULT_UNROLL_M) * SGEMM_DEFAULT_UNROLL_M;

@@ -366,12 +366,15 @@ DYNAMIC_ARCH の `gemm_r` は BUFFER_SIZE 由来で本ビルドでは 32,240〜1
 
 ## 9. 既知の上流の問題(本パッチでは修正していない)
 
-- `kernel/setparam-ref.c` の Zen 向けブロッキング調整は、`OPENBLAS_CORETYPE` で別コアを
+- ~~`kernel/setparam-ref.c` の Zen 向けブロッキング調整は、`OPENBLAS_CORETYPE` で別コアを
   強制した場合にもそのコアのテーブルへ適用される。Zen ホストで `PRESCOTT` / `CORE2` を
   強制すると、packed API と無関係な `cblas_sgemm`(例: m=1, n=5, k=300)がプロセスの
   配置次第で `sgemm_kernel` 内の SIGSEGV を起こす。このためガードページ試験はこの 2 コアでは
   完走できない(旧来の実測で読み越しは 512 B / 2 KiB 未満と分かっており、16 KiB の余白で
-  覆われる)。
+  覆われる)。~~
+  → このブランチの 3 つ目のコミットで修正した。`change/openblas-zen-blocking-override.md`
+  を参照。SIGSEGV は読み越しではなくカーネル内のスタックバッファ溢れで、`sgemm` だけでなく
+  `dgemm` も、packed API の有無と無関係に起きていた。ガードページ試験も全コアで完走する。
 - `kernel/x86_64/tobf16.c` の SMP 経路は要素数が 100,000 を超えると `nthreads` を最低 4 に
   引き上げるため、`USE_THREAD=ON` ビルドで `OPENBLAS_NUM_THREADS=1` にすると
   `cblas_sbstobf16` が停止することがある。utest ではビットシフトで bf16 に変換して回避。
