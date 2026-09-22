@@ -33,8 +33,8 @@
 /*
  * cblas_?gemm_compute: the last third of the MKL-style packed GEMM API.
  *
- *   cblas_?gemm_compute(order, transa, transb, m, n, k,
- *                       a, lda, b, ldb, beta, c, ldc)
+ *   status = cblas_?gemm_compute(order, transa, transb, m, n, k,
+ *                                a, lda, b, ldb, beta, c, ldc)
  *
  * transa and transb accept the CBLAS_TRANSPOSE values or CblasPacked. A
  * CblasPacked operand points at a buffer filled by cblas_?gemm_pack with the
@@ -49,18 +49,23 @@
  * The scratch buffer for the operand that is not packed comes from
  * blas_memory_alloc, exactly as for a regular GEMM, so concurrent calls from
  * several threads are safe and may share one read-only packed buffer.
+ *
+ * Returns 0 when C was updated. Otherwise C is untouched and the value says
+ * why: the number of the rejected argument (a packed buffer that does not fit
+ * the product is reported at its argument position, 7 or 9), or one of the
+ * negative OPENBLAS_GEMM_STATUS_* codes of cblas.h. MKL declares the routine
+ * void; callers written for MKL may keep ignoring the result.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include "common.h"
-#include "common_sbfallback.h"
 #include "gemm_packed_common.h"
 
 #define ERROR_NAME GEMM_PACKED_PREFIX "_COMPUTE "
 
-void CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, blasint n, blasint k,
-           IFLOAT *a, blasint lda, IFLOAT *b, blasint ldb, FLOAT beta, FLOAT *c, blasint ldc) {
+int CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, blasint n, blasint k,
+          IFLOAT *a, blasint lda, IFLOAT *b, blasint ldb, FLOAT beta, FLOAT *c, blasint ldc) {
   blas_arg_t args;
   blasint info = 0;
   int a_packed, b_packed, ta, tb;
@@ -148,12 +153,12 @@ void CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, bl
 
   if (info) {
     BLASFUNC(xerbla)(ERROR_NAME, &info, sizeof(ERROR_NAME));
-    return;
+    return (int)info;
   }
 
-  if ((args.m == 0) || (args.n == 0)) return;
+  if ((args.m == 0) || (args.n == 0)) return 0;
 
-  if (gemm_packed_kernels_ready() != 0) return;
+  if (gemm_packed_kernels_ready() != 0) return OPENBLAS_GEMM_STATUS_NO_KERNEL;
 
   buffer = (XFLOAT *)blas_memory_alloc(0);
 
@@ -177,12 +182,22 @@ void CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, bl
 
   blas_memory_free(buffer);
 
-  if (status != 0) {
-    /* Bit 0: the internal A buffer was rejected, bit 1: the internal B buffer.
-     * Map back to the user's operand positions a (7) and b (9) and report the
-     * lower one, as the argument checks above do. */
-    int user_a_bad = row_major ? (status & 2) : (status & 1);
+  if (status == 0) return 0;
+
+  if (status & GEMM_PACKED_COMPUTE_NO_MEMORY) {
+    /* The float expansion of the single precision SBGEMM fallback could not
+     * be allocated. The driver has said so; this is not an argument error, so
+     * xerbla is not involved. */
+    return OPENBLAS_GEMM_STATUS_NO_MEMORY;
+  }
+
+  /* Bit 0: the internal A buffer was rejected, bit 1: the internal B buffer.
+   * Map back to the user's operand positions a (7) and b (9) and report the
+   * lower one, as the argument checks above do. */
+  {
+    int user_a_bad = row_major ? (status & GEMM_PACKED_COMPUTE_BAD_B) : (status & GEMM_PACKED_COMPUTE_BAD_A);
     info = user_a_bad ? 7 : 9;
     BLASFUNC(xerbla)(ERROR_NAME, &info, sizeof(ERROR_NAME));
+    return (int)info;
   }
 }

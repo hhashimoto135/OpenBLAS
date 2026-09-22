@@ -128,7 +128,7 @@
 @cblasobjs = (  cblas_xerbla );
 
 @bfcblasobjs = (cblas_sbgemm, cblas_sbgemmt, cblas_sbgemmtr, cblas_sbgemv, cblas_sbdot, cblas_sbstobf16, cblas_sbdtobf16, cblas_sbf16tos, cblas_dbf16tod, cblas_sbgemm_batch,
-    cblas_sbgemm_pack_get_size, cblas_sbgemm_pack, cblas_sbgemm_compute);
+    cblas_sbgemm_pack_get_size, cblas_sbgemm_pack, cblas_sbgemm_compute, cblas_sbgemm_status);
 @hfcblasobjs = (cblas_shgemm);
 @exblasobjs = (
     qamax,qamin,qasum,qaxpy,qcabs1,qcopy,qdot,qgbmv,qgemm,

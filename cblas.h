@@ -113,6 +113,20 @@ typedef CBLAS_ORDER CBLAS_LAYOUT;
  * value to cblas_?gemm_compute for an operand that was packed beforehand. */
 typedef enum CBLAS_IDENTIFIER {CblasAMatrix=161, CblasBMatrix=162} CBLAS_IDENTIFIER;
 typedef enum CBLAS_STORAGE    {CblasPacked=151} CBLAS_STORAGE;
+
+/* Status returned by cblas_?gemm_pack, cblas_?gemm_compute, and
+ * cblas_sbgemm_status. 0 means the routine did its work. A positive value is
+ * the number of the argument that was rejected, which xerbla has also been
+ * told. The negative values below name failures that are not tied to one
+ * argument. C is never touched on failure; a failed pack leaves dest untouched
+ * for a rejected argument and TOO_LARGE, and otherwise leaves no valid header
+ * behind, so that a later cblas_?gemm_compute rejects the buffer. xerbla
+ * receives parameter 0 for the first two codes, the other two print a message
+ * through openblas_warning instead. */
+#define OPENBLAS_GEMM_STATUS_TOO_LARGE (-1) /* the packed size does not fit; cblas_?gemm_pack_get_size returns 0 for these dimensions */
+#define OPENBLAS_GEMM_STATUS_INTERNAL  (-2) /* the panels written disagree with the size computed in closed form */
+#define OPENBLAS_GEMM_STATUS_NO_MEMORY (-3) /* a temporary buffer of the single precision bfloat16 fallback could not be allocated */
+#define OPENBLAS_GEMM_STATUS_NO_KERNEL (-4) /* the bfloat16 kernels cannot run in this process and no fallback is compiled in */
 	
 float  cblas_sdsdot(OPENBLAS_CONST blasint n, OPENBLAS_CONST float alpha, OPENBLAS_CONST float *x, OPENBLAS_CONST blasint incx, OPENBLAS_CONST float *y, OPENBLAS_CONST blasint incy);
 double cblas_dsdot (OPENBLAS_CONST blasint n, OPENBLAS_CONST float *x, OPENBLAS_CONST blasint incx, OPENBLAS_CONST float *y, OPENBLAS_CONST blasint incy);
@@ -353,14 +367,14 @@ void cblas_dgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLA
 size_t cblas_sgemm_pack_get_size(OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K);
 size_t cblas_dgemm_pack_get_size(OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K);
 /* Packed GEMM: pack alpha * op(src) as operand `identifier` of an M x N x K product into dest. */
-void cblas_sgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+int cblas_sgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
 		      OPENBLAS_CONST float alpha, OPENBLAS_CONST float *src, OPENBLAS_CONST blasint ld, float *dest);
-void cblas_dgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+int cblas_dgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
 		      OPENBLAS_CONST double alpha, OPENBLAS_CONST double *src, OPENBLAS_CONST blasint ld, double *dest);
 /* Packed GEMM: C := alpha * op(A) * op(B) + beta * C, where TransA/TransB are CBLAS_TRANSPOSE values or CblasPacked and alpha comes from the packed operand(s). */
-void cblas_sgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+int cblas_sgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
 		         OPENBLAS_CONST float *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST float *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
-void cblas_dgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+int cblas_dgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
 		         OPENBLAS_CONST double *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST double *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST double beta, double *C, OPENBLAS_CONST blasint ldc);
 
 void cblas_cgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
@@ -518,11 +532,16 @@ void cblas_bgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLA
 		    OPENBLAS_CONST bfloat16 alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST bfloat16 beta, bfloat16 *C, OPENBLAS_CONST blasint ldc);
 void   cblas_sbgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
 		    OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
+/* cblas_sbgemm with a return value: 0 when C was updated, otherwise C is untouched and the value is an
+ * OPENBLAS_GEMM_STATUS_* code or the number of the rejected argument. cblas_sbgemm itself keeps the
+ * standard void signature and reports through xerbla and openblas_warning only. */
+int    cblas_sbgemm_status(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+		    OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
 /* Packed GEMM for bfloat16 inputs with float accumulation, see cblas_sgemm_pack_get_size, cblas_sgemm_pack, and cblas_sgemm_compute. */
 size_t cblas_sbgemm_pack_get_size(OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K);
-void   cblas_sbgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+int    cblas_sbgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
 		         OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *src, OPENBLAS_CONST blasint ld, bfloat16 *dest);
-void   cblas_sbgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+int    cblas_sbgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
 		            OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
 void cblas_sbgemm_batch(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE * TransA_array, OPENBLAS_CONST enum CBLAS_TRANSPOSE * TransB_array, OPENBLAS_CONST blasint * M_array, OPENBLAS_CONST blasint * N_array, OPENBLAS_CONST blasint * K_array,
 		       OPENBLAS_CONST float * alpha_array, OPENBLAS_CONST bfloat16 ** A_array, OPENBLAS_CONST blasint * lda_array, OPENBLAS_CONST bfloat16 ** B_array, OPENBLAS_CONST blasint * ldb_array, OPENBLAS_CONST float * beta_array, float ** C_array, OPENBLAS_CONST blasint * ldc_array, OPENBLAS_CONST blasint group_count, OPENBLAS_CONST blasint * group_size);

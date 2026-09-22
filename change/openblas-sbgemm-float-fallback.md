@@ -145,13 +145,20 @@ packed でない側だけなので、一時領域は最大 `(m*k + k*n) * 4` バ
 あたり bfloat16 と fp32 の 2 本を確保するのと同じ性質の割り切りで、それより少ない。
 
 確保に失敗したときは、**`C` に触れずに `openblas_warning(0, ...)` を出して戻る**。
-Sapphire Rapids で AMX タイル権限が得られないときに既存コードが取る挙動と同じで、
-利用側(alinalg)のドキュメントはその挙動を既に記述している。
 
 - `cblas_sbgemm`: 何も書かずに戻る。
 - `cblas_sbgemm_pack`: ヘッダ領域をゼロで潰して(後続の compute が確実に拒否する)
-  ステータス 4 を返す。`interface/gemm_pack.c` は 0 以外を `xerbla(info=0)` に写す。
-- `cblas_sbgemm_compute`: 0(成功)を返し `C` は変更しない。AMX 権限が無い場合と同じ。
+  ステータス 4 を返す。
+- `cblas_sbgemm_compute`: `C` は変更しない。
+
+> 4 つ目のコミット(`openblas-amx-fallback-status.md`)で、この失敗は呼び出し側にも
+> 伝わるようになった。`cblas_sbgemm_pack` / `cblas_sbgemm_compute` は
+> `OPENBLAS_GEMM_STATUS_NO_MEMORY` を返し(xerbla は呼ばない)、`cblas_sbgemm` は
+> void のままで、同じ本体を持つ `cblas_sbgemm_status` が同じ値を返す。
+> 判定条件(§2)にも AMX の可否が加わった: Sapphire Rapids で AMX が使えないとき、
+> `DYNAMIC_ARCH` では Cooperlake テーブルへ切り替わるので本フォールバックは
+> 関与せず、静的 `SAPPHIRERAPIDS` ビルドでは `sbgemm_float_fallback()` が 1 を返して
+> 本フォールバックが引き受ける。
 
 ## 7. 数値差
 

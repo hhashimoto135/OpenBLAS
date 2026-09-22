@@ -351,7 +351,9 @@ size_t GEMM_PACKED_SIZE_FN(BLASLONG extent, BLASLONG k) {
  * does not fit (so that ?gemm_packed_size() had returned 0), 3 when the
  * panels written disagree with the size computed in closed form, which would
  * be an internal error, and 4 when the float expansion of the single
- * precision SBGEMM fallback could not be allocated.
+ * precision SBGEMM fallback could not be allocated. 1 and 2 return before
+ * anything is written to dest; 3 and 4 leave no valid header behind, so that
+ * a later ?gemm_packed_compute() rejects the buffer.
  */
 int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
                         FLOAT alpha, IFLOAT *src, BLASLONG ld, void *dest) {
@@ -376,7 +378,8 @@ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASL
 
     if (src_float == NULL) {
       /* Leave no valid header behind, so that a later ?gemm_packed_compute()
-       * rejects the buffer instead of reading stale panels. */
+       * rejects the buffer instead of reading stale panels. The interface
+       * turns 4 into OPENBLAS_GEMM_STATUS_NO_MEMORY for the caller. */
       memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
       openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
       return 4;
@@ -442,7 +445,12 @@ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASL
     }
   }
 
-  if ((size_t)(cursor - data) != expected) return 3;
+  if ((size_t)(cursor - data) != expected) {
+    /* The panels were written over whatever the buffer held, so a header left
+     * from an earlier pack must not survive to describe them. */
+    memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
+    return 3;
+  }
 
   memset(&header, 0, sizeof(header));
   header.magic       = GEMM_PACKED_MAGIC;
@@ -520,14 +528,16 @@ static int gemm_packed_header_check(const gemm_packed_header_t *header, const vo
  * The alpha applied to the product is args->alpha multiplied by the alpha
  * recorded in each packed header.
  *
- * Returns 0 on success. Otherwise bit 0 is set when the packed A buffer is not
- * usable and bit 1 when the packed B buffer is not usable; both headers are
- * checked before returning. Nothing is written to C on failure.
+ * Returns 0 on success. Otherwise GEMM_PACKED_COMPUTE_BAD_A is set when the
+ * packed A buffer is not usable and GEMM_PACKED_COMPUTE_BAD_B when the packed
+ * B buffer is not usable; both headers are checked before returning. Nothing
+ * is written to C on failure.
  *
  * When the single precision SBGEMM fallback is active the operands that are
  * not packed are expanded to float and the whole product is handed to
  * sgemm_packed_compute. An expansion that cannot be allocated leaves C
- * untouched and reports success, as an unavailable bfloat16 kernel does.
+ * untouched and returns GEMM_PACKED_COMPUTE_NO_MEMORY, which the interface
+ * reports to the caller as OPENBLAS_GEMM_STATUS_NO_MEMORY.
  */
 int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
                            XFLOAT *sa, XFLOAT *sb, unsigned int type_tag) {
@@ -566,8 +576,8 @@ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packe
       BLASLONG cols = product_is_empty ? 0 : (transa ? m : k);
       a_float = sbgemm_expand_to_float(a, rows, cols, lda);
       if (a_float == NULL) {
-        openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
-        return 0;
+        openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
+        return GEMM_PACKED_COMPUTE_NO_MEMORY;
       }
       float_args.a = (void *)a_float;
       float_args.lda = sbgemm_expanded_ld(rows);
@@ -578,8 +588,8 @@ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packe
       b_float = sbgemm_expand_to_float(b, rows, cols, ldb);
       if (b_float == NULL) {
         free(a_float);
-        openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
-        return 0;
+        openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
+        return GEMM_PACKED_COMPUTE_NO_MEMORY;
       }
       float_args.b = (void *)b_float;
       float_args.ldb = sbgemm_expanded_ld(rows);
@@ -595,11 +605,11 @@ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packe
 
   if (a_packed) {
     memcpy(&header_a, args->a, sizeof(header_a));
-    if (gemm_packed_header_check(&header_a, args->a, GEMM_PACKED_IDENTIFIER_A, m, n, k, type_tag)) status |= 1;
+    if (gemm_packed_header_check(&header_a, args->a, GEMM_PACKED_IDENTIFIER_A, m, n, k, type_tag)) status |= GEMM_PACKED_COMPUTE_BAD_A;
   }
   if (b_packed) {
     memcpy(&header_b, args->b, sizeof(header_b));
-    if (gemm_packed_header_check(&header_b, args->b, GEMM_PACKED_IDENTIFIER_B, m, n, k, type_tag)) status |= 2;
+    if (gemm_packed_header_check(&header_b, args->b, GEMM_PACKED_IDENTIFIER_B, m, n, k, type_tag)) status |= GEMM_PACKED_COMPUTE_BAD_B;
   }
   if (status) return status;
 

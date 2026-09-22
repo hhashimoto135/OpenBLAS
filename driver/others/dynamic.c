@@ -409,10 +409,16 @@ int support_amx_bf16() {
   // CPUID.7.0:EDX indicates AMX support
   cpuid_count(7, 0, &eax, &ebx, &ecx, &edx);
   if ((edx & BIT_AMX_TILE) && (edx & BIT_AMX_BF16)) {
-    // CPUID.D.0:EAX[17:18] indicates AMX enabled
+    // CPUID.D.0:EAX[17:18] indicates that the CPU supports the AMX tile state
     cpuid_count(0xd, 0, &eax, &ebx, &ecx, &edx);
-    if ((eax & BIT_AMX_ENBD) == BIT_AMX_ENBD)
-      ret = 1;
+    if ((eax & BIT_AMX_ENBD) == BIT_AMX_ENBD) {
+      // XCR0[17:18] indicates that the OS enabled it; a Linux kernel older
+      // than 5.16, or a Windows without AMX support, leaves both bits clear
+      // although CPUID.D.0 reports them
+      xgetbv(0, &eax, &edx);
+      if ((eax & BIT_AMX_ENBD) == BIT_AMX_ENBD)
+        ret = 1;
+    }
   }
   return ret;
 #else
@@ -426,6 +432,7 @@ extern void openblas_warning(int verbose, const char * msg);
 #define SANDYBRIDGE_FALLBACK "OpenBLAS : Your OS does not support AVX2 instructions. OpenBLAS is using Sandybridge kernels as a fallback, which may give poorer performance.\n"
 #define HASWELL_FALLBACK "OpenBLAS : Your OS does not support AVX512VL instructions. OpenBLAS is using Haswell kernels as a fallback, which may give poorer performance.\n"
 #define BARCELONA_FALLBACK "OpenBLAS : Your OS does not support AVX instructions. OpenBLAS is using Barcelona kernels as a fallback, which may give poorer performance.\n"
+#define AMX_FALLBACK "OpenBLAS : Your CPU or OS does not support AMX. OpenBLAS is using the Cooperlake bfloat16 GEMM kernels as a fallback.\n"
 
 static int get_vendor(void){
   int eax, ebx, ecx, edx;
@@ -1073,6 +1080,61 @@ char *gotoblas_corename(void) {
   return corename[0];
 }
 
+#if BUILD_BFLOAT16 == 1
+/* Gives the table in use the bfloat16 GEMM entries of the Cooperlake table,
+ * for a Sapphire Rapids whose AMX this process cannot use: the Cooperlake
+ * kernels need AVX512-BF16 only, which Sapphire Rapids has. Only the SBGEMM
+ * fields move. The rest of the table, and with it every other routine, stays
+ * the selected core's; the two param.h sections differ in more than their
+ * SBGEMM blocking, so swapping the whole table would change the SGEMM
+ * blocking under a call running in another thread. The SBGEMM fields are read
+ * only by the bfloat16 GEMM entry points, and each of those asks
+ * sbgemm_kernels_unavailable() (driver/others/sbgemm_amx.c) before reading
+ * them, which is what makes this rewrite safe. Returns 0 when done and
+ * non-zero when this build has no Cooperlake table of its own, in which case
+ * the caller computes bfloat16 products in single precision instead. */
+int gotoblas_sbgemm_use_cooperlake(void) {
+#if !defined(DYNAMIC_LIST) || defined(DYN_COOPERLAKE)
+  gotoblas_t *from = &gotoblas_COOPERLAKE;
+  gotoblas_t *to = gotoblas;
+
+  if (from == to) return 0;
+  /* init() derives sbgemm_r from the blocking of its own table. */
+  if (from -> init) from -> init();
+
+  to -> sbgemm_p         = from -> sbgemm_p;
+  to -> sbgemm_q         = from -> sbgemm_q;
+  to -> sbgemm_r         = from -> sbgemm_r;
+  to -> sbgemm_unroll_m  = from -> sbgemm_unroll_m;
+  to -> sbgemm_unroll_n  = from -> sbgemm_unroll_n;
+  to -> sbgemm_unroll_mn = from -> sbgemm_unroll_mn;
+  to -> sbgemm_align_k   = from -> sbgemm_align_k;
+  to -> sbgemm_kernel    = from -> sbgemm_kernel;
+  to -> sbgemm_beta      = from -> sbgemm_beta;
+  to -> sbgemm_incopy    = from -> sbgemm_incopy;
+  to -> sbgemm_itcopy    = from -> sbgemm_itcopy;
+  to -> sbgemm_oncopy    = from -> sbgemm_oncopy;
+  to -> sbgemm_otcopy    = from -> sbgemm_otcopy;
+#ifdef SMALL_MATRIX_OPT
+  to -> sbgemm_small_matrix_permit = from -> sbgemm_small_matrix_permit;
+  to -> sbgemm_small_kernel_nn     = from -> sbgemm_small_kernel_nn;
+  to -> sbgemm_small_kernel_nt     = from -> sbgemm_small_kernel_nt;
+  to -> sbgemm_small_kernel_tn     = from -> sbgemm_small_kernel_tn;
+  to -> sbgemm_small_kernel_tt     = from -> sbgemm_small_kernel_tt;
+  to -> sbgemm_small_kernel_b0_nn  = from -> sbgemm_small_kernel_b0_nn;
+  to -> sbgemm_small_kernel_b0_nt  = from -> sbgemm_small_kernel_b0_nt;
+  to -> sbgemm_small_kernel_b0_tn  = from -> sbgemm_small_kernel_b0_tn;
+  to -> sbgemm_small_kernel_b0_tt  = from -> sbgemm_small_kernel_b0_tt;
+#endif
+  /* Nothing left in the table needs AMX. */
+  to -> need_amxtile_permission = 0;
+  return 0;
+#else
+  return -1;
+#endif
+}
+#endif
+
 
 
 static gotoblas_t *force_coretype(char *coretype){
@@ -1082,7 +1144,7 @@ static gotoblas_t *force_coretype(char *coretype){
 	char message[128];
 	//char mname[20];
 
-	for ( i=1 ; i <= 25; i++)
+	for ( i=1 ; i <= 26; i++)
 	{
 		if (!strncasecmp(coretype,corename[i],20))
 		{
@@ -1100,6 +1162,7 @@ static gotoblas_t *force_coretype(char *coretype){
 
 	switch (found)
 	{
+		case 26: return (&gotoblas_SAPPHIRERAPIDS);
 		case 25: return (&gotoblas_COOPERLAKE);
 		case 24: return (&gotoblas_SKYLAKEX);	
 		case 23: return (&gotoblas_ZEN);
@@ -1182,6 +1245,20 @@ void gotoblas_dynamic_init(void) {
     openblas_warning(0, "OpenBLAS : Architecture Initialization failed. No initialization function found.\n");
     exit(1);
   }
+
+#if BUILD_BFLOAT16 == 1
+  /* get_coretype() asks support_amx_bf16() before it chooses Sapphire Rapids;
+   * force_coretype() does not, so OPENBLAS_CORETYPE=SapphireRapids on a host
+   * or OS without AMX would run the AMX kernels. Take the Cooperlake bfloat16
+   * GEMM entries now, so that they never run. The per-process permission that
+   * Linux adds on top is asked for lazily, on the first bfloat16 GEMM, by
+   * driver/others/sbgemm_amx.c, which rewrites the table the same way. */
+  if (gotoblas -> need_amxtile_permission && !support_amx_bf16()) {
+    if (gotoblas_sbgemm_use_cooperlake() == 0) {
+      openblas_warning(FALLBACK_VERBOSE, AMX_FALLBACK);
+    }
+  }
+#endif
 
 }
 

@@ -798,5 +798,47 @@ CTEST(sgemm_pack, xerbla_compute_rejects_foreign_pack)
 }
 #endif
 
+/* The packed entry points return a status: 0 when they did their work, the
+ * parameter number they gave xerbla when an argument or a packed buffer was
+ * rejected, and a negative OPENBLAS_GEMM_STATUS_* code for a failure that has
+ * no argument to blame. */
+CTEST(sgemm_pack, status_reports_success_and_rejections)
+{
+    struct sgemm_pack_fixture f;
+    float a[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float dest[64];
+    blasint huge = (blasint)(((blasint)1 << (sizeof(blasint) * 8 - 2)) - 1) * 2 + 1;
+
+    sgemm_pack_fixture_init(&f);
+
+    ASSERT_EQUAL(0, cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0f, f.a, 4, f.packed_a));
+    ASSERT_EQUAL(0, cblas_sgemm_compute(CblasColMajor, CblasPacked, CblasPacked, 4, 4, 4, f.packed_a, 4,
+                                        f.packed_b, 4, 0.0f, f.c, 4));
+    ASSERT_EQUAL(0, cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 0, 4, 4, f.a, 4, f.b, 4,
+                                        0.0f, f.c, 4));
+
+    set_xerbla("SGEMM_PACK ", 9);
+    ASSERT_EQUAL(9, cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 2, 2, 2, 1.0f, a, 1, dest));
+    ASSERT_TRUE(check_error());
+
+    set_xerbla("SGEMM_PACK ", 0);
+    ASSERT_EQUAL(OPENBLAS_GEMM_STATUS_TOO_LARGE,
+                 cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, huge, 1, huge, 1.0f, a, huge, dest));
+    ASSERT_TRUE(check_error());
+
+    set_xerbla("SGEMM_COMPUTE ", 13);
+    ASSERT_EQUAL(13, cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, a, 2, a, 2, 0.0f,
+                                         dest, 1));
+    ASSERT_TRUE(check_error());
+
+    /* A packed operand made for another k is reported at its own position. */
+    set_xerbla("SGEMM_COMPUTE ", 9);
+    ASSERT_EQUAL(9, cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 5, f.a, 4, f.packed_b, 4,
+                                        0.0f, f.c, 4));
+    ASSERT_TRUE(check_error());
+
+    sgemm_pack_fixture_free(&f);
+}
+
 #endif /* NO_CBLAS */
 #endif /* BUILD_SINGLE */

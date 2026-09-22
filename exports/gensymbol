@@ -130,7 +130,7 @@ cblasobjsz="
 
 cblasobjs="cblas_xerbla"
 
-bfcblasobjs="cblas_sbgemm cblas_sbgemv cblas_sbdot cblas_sbstobf16 cblas_sbdtobf16 cblas_sbf16tos cblas_dbf16tod cblas_sbgemm_batch cblas_sbgemm_pack_get_size cblas_sbgemm_pack cblas_sbgemm_compute"
+bfcblasobjs="cblas_sbgemm cblas_sbgemv cblas_sbdot cblas_sbstobf16 cblas_sbdtobf16 cblas_sbf16tos cblas_dbf16tod cblas_sbgemm_batch cblas_sbgemm_pack_get_size cblas_sbgemm_pack cblas_sbgemm_compute cblas_sbgemm_status"
 hfcblasobjs="cblas_shgemm"
 
 exblasobjs="

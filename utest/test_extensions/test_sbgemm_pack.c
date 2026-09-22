@@ -394,5 +394,74 @@ CTEST(sbgemm_pack, xerbla_compute_rejects_foreign_pack)
 #endif
 }
 
+/* cblas_sbgemm_status is cblas_sbgemm with a return value, and the packed
+ * entry points return one too: 0 when they did their work, the parameter
+ * number given to xerbla when an argument or a packed buffer was rejected, and
+ * a negative OPENBLAS_GEMM_STATUS_* code for a failure that has no argument to
+ * blame. Every value here is exact in bfloat16 and the sums are small, so the
+ * status variant, the plain routine and the packed compute agree exactly. */
+CTEST(sbgemm_pack, status_reports_success_and_rejections)
+{
+    bfloat16 a[16], b[16], a5[20];
+    float c_ref[16], c[16];
+    unsigned char *packed_b;
+    int i;
+
+    for (i = 0; i < 16; i++) {
+        a[i] = to_bf16(1.0f + (float)(i % 3));
+        b[i] = to_bf16(2.0f - (float)(i % 5));
+        c_ref[i] = 7.0f;
+        c[i] = 7.0f;
+    }
+    /* A 4 x 5 operand for the k = 5 case: the single precision fallback widens
+     * the operand before it reads the packed header, so it must be real. */
+    for (i = 0; i < 20; i++) a5[i] = to_bf16(1.0f);
+
+    cblas_sbgemm(CblasColMajor, CblasNoTrans, CblasTrans, 4, 4, 4, 1.0f, a, 4, b, 4, 0.5f, c_ref, 4);
+    ASSERT_EQUAL(0, cblas_sbgemm_status(CblasColMajor, CblasNoTrans, CblasTrans, 4, 4, 4, 1.0f, a, 4, b, 4, 0.5f, c, 4));
+    for (i = 0; i < 16; i++) ASSERT_DBL_NEAR_TOL(c_ref[i], c[i], SINGLE_EPS);
+
+    ASSERT_EQUAL(0, cblas_sbgemm_status(CblasColMajor, CblasNoTrans, CblasNoTrans, 0, 4, 4, 1.0f, a, 4, b, 4, 0.5f, c, 4));
+
+    set_xerbla("SBGEMM ", 2);
+    ASSERT_EQUAL(2, cblas_sbgemm_status(CblasColMajor, CblasNoTrans, INVALID, 4, 4, 4, 1.0f, a, 4, b, 4, 0.0f, c, 4));
+    ASSERT_TRUE(check_error());
+
+    set_xerbla("SBGEMM ", 13);
+    ASSERT_EQUAL(13, cblas_sbgemm_status(CblasColMajor, CblasNoTrans, CblasNoTrans, 4, 4, 4, 1.0f, a, 4, b, 4, 0.0f, c, 1));
+    ASSERT_TRUE(check_error());
+
+    packed_b = (unsigned char *)malloc(cblas_sbgemm_pack_get_size(CblasBMatrix, 4, 4, 4));
+    ASSERT_EQUAL(0, cblas_sbgemm_pack(CblasColMajor, CblasBMatrix, CblasTrans, 4, 4, 4, 1.0f, b, 4, (bfloat16 *)packed_b));
+    for (i = 0; i < 16; i++) c[i] = 7.0f;
+    ASSERT_EQUAL(0, cblas_sbgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 4, a, 4, (bfloat16 *)packed_b, 4,
+                                         0.5f, c, 4));
+    for (i = 0; i < 16; i++) ASSERT_DBL_NEAR_TOL(c_ref[i], c[i], SINGLE_EPS);
+
+    /* A rejected argument leaves the buffer untouched, so the earlier pack
+     * still serves. */
+    set_xerbla("SBGEMM_PACK ", 9);
+    ASSERT_EQUAL(9, cblas_sbgemm_pack(CblasColMajor, CblasBMatrix, CblasNoTrans, 4, 4, 4, 1.0f, b, 1, (bfloat16 *)packed_b));
+    ASSERT_TRUE(check_error());
+    for (i = 0; i < 16; i++) c[i] = 7.0f;
+    ASSERT_EQUAL(0, cblas_sbgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 4, a, 4, (bfloat16 *)packed_b, 4,
+                                         0.5f, c, 4));
+    for (i = 0; i < 16; i++) ASSERT_DBL_NEAR_TOL(c_ref[i], c[i], SINGLE_EPS);
+
+    /* A packed operand made for another k is reported at its own position. */
+    set_xerbla("SBGEMM_COMPUTE ", 9);
+    ASSERT_EQUAL(9, cblas_sbgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 5, a5, 4, (bfloat16 *)packed_b, 4,
+                                         0.0f, c, 4));
+    ASSERT_TRUE(check_error());
+
+    /* An order that is neither row nor column major names argument 1. */
+    set_xerbla("SBGEMM ", 0);
+    ASSERT_EQUAL(1, cblas_sbgemm_status((enum CBLAS_ORDER)INVALID, CblasNoTrans, CblasNoTrans, 4, 4, 4, 1.0f, a, 4, b, 4,
+                                        0.0f, c, 4));
+    ASSERT_TRUE(check_error());
+
+    free(packed_b);
+}
+
 #endif /* NO_CBLAS */
 #endif /* BUILD_BFLOAT16 */

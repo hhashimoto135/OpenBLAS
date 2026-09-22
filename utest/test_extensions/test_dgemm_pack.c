@@ -798,5 +798,43 @@ CTEST(dgemm_pack, xerbla_compute_rejects_foreign_pack)
 }
 #endif
 
+/* See test_sgemm_pack.c. */
+CTEST(dgemm_pack, status_reports_success_and_rejections)
+{
+    struct dgemm_pack_fixture f;
+    double a[4] = {0.0, 0.0, 0.0, 0.0};
+    double dest[64];
+    blasint huge = (blasint)(((blasint)1 << (sizeof(blasint) * 8 - 2)) - 1) * 2 + 1;
+
+    dgemm_pack_fixture_init(&f);
+
+    ASSERT_EQUAL(0, cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0, f.a, 4, f.packed_a));
+    ASSERT_EQUAL(0, cblas_dgemm_compute(CblasColMajor, CblasPacked, CblasPacked, 4, 4, 4, f.packed_a, 4,
+                                        f.packed_b, 4, 0.0, f.c, 4));
+    ASSERT_EQUAL(0, cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 0, 4, 4, f.a, 4, f.b, 4,
+                                        0.0, f.c, 4));
+
+    set_xerbla("DGEMM_PACK ", 9);
+    ASSERT_EQUAL(9, cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 2, 2, 2, 1.0, a, 1, dest));
+    ASSERT_TRUE(check_error());
+
+    set_xerbla("DGEMM_PACK ", 0);
+    ASSERT_EQUAL(OPENBLAS_GEMM_STATUS_TOO_LARGE,
+                 cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, huge, 1, huge, 1.0, a, huge, dest));
+    ASSERT_TRUE(check_error());
+
+    set_xerbla("DGEMM_COMPUTE ", 13);
+    ASSERT_EQUAL(13, cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, a, 2, a, 2, 0.0,
+                                         dest, 1));
+    ASSERT_TRUE(check_error());
+
+    set_xerbla("DGEMM_COMPUTE ", 9);
+    ASSERT_EQUAL(9, cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 5, f.a, 4, f.packed_b, 4,
+                                        0.0, f.c, 4));
+    ASSERT_TRUE(check_error());
+
+    dgemm_pack_fixture_free(&f);
+}
+
 #endif /* NO_CBLAS */
 #endif /* BUILD_DOUBLE */

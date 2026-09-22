@@ -67,6 +67,12 @@ else ()
   list(APPEND COMMON_SOURCES parameter.c)
 endif ()
 
+if (BUILD_BFLOAT16)
+  # Decides once per process whether the bfloat16 GEMM kernels can run (AMX on
+  # Sapphire Rapids) and what stands in for them otherwise.
+  list(APPEND COMMON_SOURCES sbgemm_amx.c)
+endif ()
+
 #ifdef EXPRECISION
 #COMMONOBJS	+= x_abs.$(SUFFIX) qlamch.$(SUFFIX) qlamc3.$(SUFFIX)
 #endif

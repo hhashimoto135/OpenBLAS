@@ -32,7 +32,7 @@
 
 /*
  * Single precision fallback for SBGEMM on x86-64 cores that have no bfloat16
- * GEMM kernel.
+ * GEMM kernel, or whose bfloat16 kernel cannot run in this process.
  *
  * kernel/Makefile.L3 leaves SBGEMMKERNEL at ../generic/gemmkernel_2x2.c with
  * ../generic/gemm_ncopy_2.c and ../generic/gemm_tcopy_2.c for every core that
@@ -53,6 +53,10 @@
  * The condition is the core selected at run time, not the instruction set of
  * the CPU: OPENBLAS_CORETYPE can pin a core without a bfloat16 kernel on a CPU
  * that supports AVX512-BF16, and that core is what decides which kernel runs.
+ * The Sapphire Rapids kernel has one more condition, AMX being usable by the
+ * process; sbgemm_kernels_unavailable() (driver/others/sbgemm_amx.c) settles
+ * it, replaces the bfloat16 GEMM entries of the table with Cooperlake's where
+ * it can, and otherwise hands the product to this fallback.
  *
  * Only x86-64 is covered. Other architectures either ship a bfloat16 kernel
  * (POWER10, Neoverse N2, RISC-V ZVL) or are outside what this fork targets.
@@ -60,6 +64,18 @@
 
 #ifndef COMMON_SBFALLBACK_H
 #define COMMON_SBFALLBACK_H
+
+#if defined(ARCH_X86_64)
+/* Non-zero when the bfloat16 GEMM kernels of the core in use cannot run in
+ * this process, which on x86-64 means Sapphire Rapids without usable AMX.
+ * Under DYNAMIC_ARCH the bfloat16 GEMM entries of the table are first replaced
+ * by Cooperlake's when the build has that table, so the answer is non-zero
+ * only where no bfloat16 kernel can take over and the fallback below is the
+ * last resort. Every bfloat16 GEMM entry point asks before it reads an SBGEMM
+ * blocking parameter or kernel pointer, and the answer is cached for the life
+ * of the process. */
+int sbgemm_kernels_unavailable(void);
+#endif
 
 #if defined(BFLOAT16) && !defined(BGEMM) && defined(ARCH_X86_64) && defined(BUILD_SINGLE)
 #define SBGEMM_FLOAT_FALLBACK 1
@@ -77,17 +93,21 @@ extern char *gotoblas_corename(void);
 
 extern void openblas_warning(int verbose, const char *msg);
 
-/* The compute side leaves C untouched and reports success; the pack side has
- * an error to report, so it says less. */
-#define SBGEMM_FALLBACK_SKIPPED "sbgemm: cannot allocate the float expansion, skipping\n"
 #define SBGEMM_FALLBACK_NO_MEMORY "sbgemm: cannot allocate the float expansion\n"
 
 /* Non-zero when SBGEMM must be computed with the SGEMM kernels. */
 static inline int sbgemm_float_fallback(void) {
 #if defined(DYNAMIC_ARCH)
-  const char *core = gotoblas_corename();
+  const char *core;
+  /* Resolve AMX first. A Sapphire Rapids table whose AMX is unusable keeps
+   * its name but runs Cooperlake's bfloat16 kernels afterwards, so the name
+   * still says that a bfloat16 kernel exists. */
+  if (sbgemm_kernels_unavailable()) return 1;
+  core = gotoblas_corename();
   return strcmp(core, "Cooperlake") != 0 && strcmp(core, "SapphireRapids") != 0;
-#elif defined(COOPERLAKE) || defined(SAPPHIRERAPIDS)
+#elif defined(SAPPHIRERAPIDS)
+  return sbgemm_kernels_unavailable();
+#elif defined(COOPERLAKE)
   return 0;
 #else
   return 1;

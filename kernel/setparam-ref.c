@@ -2101,9 +2101,7 @@ static void init_parameter(void) {
  * "cooperlake" / "skylakex" / "sapphirerapids" while the x86-64 corename[]
  * table in driver/others/dynamic.c holds "Cooperlake" / "SkylakeX" /
  * "SapphireRapids", so the strcmp never matches and the tuning is lost
- * everywhere. A run time gate on that name would also inherit the loop bound
- * in force_coretype(), which stops at corename[25] and so can never report
- * "SapphireRapids". This file is compiled once per core, and only under
+ * everywhere. This file is compiled once per core, and only under
  * DYNAMIC_ARCH, so the whitelist is a compile time question either way.
  */
 #if defined(COOPERLAKE) || defined(SKYLAKEX) || defined(SAPPHIRERAPIDS)

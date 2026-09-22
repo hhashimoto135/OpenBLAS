@@ -1,0 +1,1348 @@
+diff --git a/cblas.h b/cblas.h
+index 823ee752b..0999a5d66 100644
+--- a/cblas.h
++++ b/cblas.h
+@@ -113,6 +113,20 @@ typedef CBLAS_ORDER CBLAS_LAYOUT;
+  * value to cblas_?gemm_compute for an operand that was packed beforehand. */
+ typedef enum CBLAS_IDENTIFIER {CblasAMatrix=161, CblasBMatrix=162} CBLAS_IDENTIFIER;
+ typedef enum CBLAS_STORAGE    {CblasPacked=151} CBLAS_STORAGE;
++
++/* Status returned by cblas_?gemm_pack, cblas_?gemm_compute, and
++ * cblas_sbgemm_status. 0 means the routine did its work. A positive value is
++ * the number of the argument that was rejected, which xerbla has also been
++ * told. The negative values below name failures that are not tied to one
++ * argument. C is never touched on failure; a failed pack leaves dest untouched
++ * for a rejected argument and TOO_LARGE, and otherwise leaves no valid header
++ * behind, so that a later cblas_?gemm_compute rejects the buffer. xerbla
++ * receives parameter 0 for the first two codes, the other two print a message
++ * through openblas_warning instead. */
++#define OPENBLAS_GEMM_STATUS_TOO_LARGE (-1) /* the packed size does not fit; cblas_?gemm_pack_get_size returns 0 for these dimensions */
++#define OPENBLAS_GEMM_STATUS_INTERNAL  (-2) /* the panels written disagree with the size computed in closed form */
++#define OPENBLAS_GEMM_STATUS_NO_MEMORY (-3) /* a temporary buffer of the single precision bfloat16 fallback could not be allocated */
++#define OPENBLAS_GEMM_STATUS_NO_KERNEL (-4) /* the bfloat16 kernels cannot run in this process and no fallback is compiled in */
+ 	
+ float  cblas_sdsdot(OPENBLAS_CONST blasint n, OPENBLAS_CONST float alpha, OPENBLAS_CONST float *x, OPENBLAS_CONST blasint incx, OPENBLAS_CONST float *y, OPENBLAS_CONST blasint incy);
+ double cblas_dsdot (OPENBLAS_CONST blasint n, OPENBLAS_CONST float *x, OPENBLAS_CONST blasint incx, OPENBLAS_CONST float *y, OPENBLAS_CONST blasint incy);
+@@ -353,14 +367,14 @@ void cblas_dgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLA
+ size_t cblas_sgemm_pack_get_size(OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K);
+ size_t cblas_dgemm_pack_get_size(OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K);
+ /* Packed GEMM: pack alpha * op(src) as operand `identifier` of an M x N x K product into dest. */
+-void cblas_sgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++int cblas_sgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		      OPENBLAS_CONST float alpha, OPENBLAS_CONST float *src, OPENBLAS_CONST blasint ld, float *dest);
+-void cblas_dgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++int cblas_dgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		      OPENBLAS_CONST double alpha, OPENBLAS_CONST double *src, OPENBLAS_CONST blasint ld, double *dest);
+ /* Packed GEMM: C := alpha * op(A) * op(B) + beta * C, where TransA/TransB are CBLAS_TRANSPOSE values or CblasPacked and alpha comes from the packed operand(s). */
+-void cblas_sgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++int cblas_sgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		         OPENBLAS_CONST float *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST float *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
+-void cblas_dgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++int cblas_dgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		         OPENBLAS_CONST double *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST double *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST double beta, double *C, OPENBLAS_CONST blasint ldc);
+ 
+ void cblas_cgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+@@ -518,11 +532,16 @@ void cblas_bgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLA
+ 		    OPENBLAS_CONST bfloat16 alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST bfloat16 beta, bfloat16 *C, OPENBLAS_CONST blasint ldc);
+ void   cblas_sbgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		    OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
++/* cblas_sbgemm with a return value: 0 when C was updated, otherwise C is untouched and the value is an
++ * OPENBLAS_GEMM_STATUS_* code or the number of the rejected argument. cblas_sbgemm itself keeps the
++ * standard void signature and reports through xerbla and openblas_warning only. */
++int    cblas_sbgemm_status(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++		    OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
+ /* Packed GEMM for bfloat16 inputs with float accumulation, see cblas_sgemm_pack_get_size, cblas_sgemm_pack, and cblas_sgemm_compute. */
+ size_t cblas_sbgemm_pack_get_size(OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K);
+-void   cblas_sbgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++int    cblas_sbgemm_pack(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_IDENTIFIER identifier, OPENBLAS_CONST enum CBLAS_TRANSPOSE Trans, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		         OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *src, OPENBLAS_CONST blasint ld, bfloat16 *dest);
+-void   cblas_sbgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
++int    cblas_sbgemm_compute(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST blasint TransA, OPENBLAS_CONST blasint TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		            OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
+ void cblas_sbgemm_batch(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE * TransA_array, OPENBLAS_CONST enum CBLAS_TRANSPOSE * TransB_array, OPENBLAS_CONST blasint * M_array, OPENBLAS_CONST blasint * N_array, OPENBLAS_CONST blasint * K_array,
+ 		       OPENBLAS_CONST float * alpha_array, OPENBLAS_CONST bfloat16 ** A_array, OPENBLAS_CONST blasint * lda_array, OPENBLAS_CONST bfloat16 ** B_array, OPENBLAS_CONST blasint * ldb_array, OPENBLAS_CONST float * beta_array, float ** C_array, OPENBLAS_CONST blasint * ldc_array, OPENBLAS_CONST blasint group_count, OPENBLAS_CONST blasint * group_size);
+diff --git a/common_level3.h b/common_level3.h
+index 6118dd07c..e174cf5f6 100644
+--- a/common_level3.h
++++ b/common_level3.h
+@@ -2098,6 +2098,12 @@ int dgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLON
+ int sbgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
+                        float alpha, bfloat16 *src, BLASLONG ld, void *dest);
+ 
++/* Bits of the value ?gemm_packed_compute returns. 0 is success; each bit
++ * names a reason for having left C untouched. */
++#define GEMM_PACKED_COMPUTE_BAD_A      1 /* the packed A buffer is not usable */
++#define GEMM_PACKED_COMPUTE_BAD_B      2 /* the packed B buffer is not usable */
++#define GEMM_PACKED_COMPUTE_NO_MEMORY  4 /* the float expansion of the SBGEMM fallback could not be allocated */
++
+ /* `type_tag` is the GEMM_PACKED_TAG_* a packed operand must carry to be
+  * accepted; it is the tag of the entry point the caller used, not of this
+  * driver. */
+diff --git a/common_sbfallback.h b/common_sbfallback.h
+index af731ee50..97e959b6c 100644
+--- a/common_sbfallback.h
++++ b/common_sbfallback.h
+@@ -32,7 +32,7 @@
+ 
+ /*
+  * Single precision fallback for SBGEMM on x86-64 cores that have no bfloat16
+- * GEMM kernel.
++ * GEMM kernel, or whose bfloat16 kernel cannot run in this process.
+  *
+  * kernel/Makefile.L3 leaves SBGEMMKERNEL at ../generic/gemmkernel_2x2.c with
+  * ../generic/gemm_ncopy_2.c and ../generic/gemm_tcopy_2.c for every core that
+@@ -53,6 +53,10 @@
+  * The condition is the core selected at run time, not the instruction set of
+  * the CPU: OPENBLAS_CORETYPE can pin a core without a bfloat16 kernel on a CPU
+  * that supports AVX512-BF16, and that core is what decides which kernel runs.
++ * The Sapphire Rapids kernel has one more condition, AMX being usable by the
++ * process; sbgemm_kernels_unavailable() (driver/others/sbgemm_amx.c) settles
++ * it, replaces the bfloat16 GEMM entries of the table with Cooperlake's where
++ * it can, and otherwise hands the product to this fallback.
+  *
+  * Only x86-64 is covered. Other architectures either ship a bfloat16 kernel
+  * (POWER10, Neoverse N2, RISC-V ZVL) or are outside what this fork targets.
+@@ -61,6 +65,18 @@
+ #ifndef COMMON_SBFALLBACK_H
+ #define COMMON_SBFALLBACK_H
+ 
++#if defined(ARCH_X86_64)
++/* Non-zero when the bfloat16 GEMM kernels of the core in use cannot run in
++ * this process, which on x86-64 means Sapphire Rapids without usable AMX.
++ * Under DYNAMIC_ARCH the bfloat16 GEMM entries of the table are first replaced
++ * by Cooperlake's when the build has that table, so the answer is non-zero
++ * only where no bfloat16 kernel can take over and the fallback below is the
++ * last resort. Every bfloat16 GEMM entry point asks before it reads an SBGEMM
++ * blocking parameter or kernel pointer, and the answer is cached for the life
++ * of the process. */
++int sbgemm_kernels_unavailable(void);
++#endif
++
+ #if defined(BFLOAT16) && !defined(BGEMM) && defined(ARCH_X86_64) && defined(BUILD_SINGLE)
+ #define SBGEMM_FLOAT_FALLBACK 1
+ #endif
+@@ -77,17 +93,21 @@ extern char *gotoblas_corename(void);
+ 
+ extern void openblas_warning(int verbose, const char *msg);
+ 
+-/* The compute side leaves C untouched and reports success; the pack side has
+- * an error to report, so it says less. */
+-#define SBGEMM_FALLBACK_SKIPPED "sbgemm: cannot allocate the float expansion, skipping\n"
+ #define SBGEMM_FALLBACK_NO_MEMORY "sbgemm: cannot allocate the float expansion\n"
+ 
+ /* Non-zero when SBGEMM must be computed with the SGEMM kernels. */
+ static inline int sbgemm_float_fallback(void) {
+ #if defined(DYNAMIC_ARCH)
+-  const char *core = gotoblas_corename();
++  const char *core;
++  /* Resolve AMX first. A Sapphire Rapids table whose AMX is unusable keeps
++   * its name but runs Cooperlake's bfloat16 kernels afterwards, so the name
++   * still says that a bfloat16 kernel exists. */
++  if (sbgemm_kernels_unavailable()) return 1;
++  core = gotoblas_corename();
+   return strcmp(core, "Cooperlake") != 0 && strcmp(core, "SapphireRapids") != 0;
+-#elif defined(COOPERLAKE) || defined(SAPPHIRERAPIDS)
++#elif defined(SAPPHIRERAPIDS)
++  return sbgemm_kernels_unavailable();
++#elif defined(COOPERLAKE)
+   return 0;
+ #else
+   return 1;
+diff --git a/driver/level3/gemm_packed.c b/driver/level3/gemm_packed.c
+index ffcdd5f47..2a5acefb9 100644
+--- a/driver/level3/gemm_packed.c
++++ b/driver/level3/gemm_packed.c
+@@ -351,7 +351,9 @@ size_t GEMM_PACKED_SIZE_FN(BLASLONG extent, BLASLONG k) {
+  * does not fit (so that ?gemm_packed_size() had returned 0), 3 when the
+  * panels written disagree with the size computed in closed form, which would
+  * be an internal error, and 4 when the float expansion of the single
+- * precision SBGEMM fallback could not be allocated.
++ * precision SBGEMM fallback could not be allocated. 1 and 2 return before
++ * anything is written to dest; 3 and 4 leave no valid header behind, so that
++ * a later ?gemm_packed_compute() rejects the buffer.
+  */
+ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
+                         FLOAT alpha, IFLOAT *src, BLASLONG ld, void *dest) {
+@@ -376,7 +378,8 @@ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASL
+ 
+     if (src_float == NULL) {
+       /* Leave no valid header behind, so that a later ?gemm_packed_compute()
+-       * rejects the buffer instead of reading stale panels. */
++       * rejects the buffer instead of reading stale panels. The interface
++       * turns 4 into OPENBLAS_GEMM_STATUS_NO_MEMORY for the caller. */
+       memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
+       openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
+       return 4;
+@@ -442,7 +445,12 @@ int GEMM_PACKED_PACK_FN(int identifier, int trans, BLASLONG m, BLASLONG n, BLASL
+     }
+   }
+ 
+-  if ((size_t)(cursor - data) != expected) return 3;
++  if ((size_t)(cursor - data) != expected) {
++    /* The panels were written over whatever the buffer held, so a header left
++     * from an earlier pack must not survive to describe them. */
++    memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
++    return 3;
++  }
+ 
+   memset(&header, 0, sizeof(header));
+   header.magic       = GEMM_PACKED_MAGIC;
+@@ -520,14 +528,16 @@ static int gemm_packed_header_check(const gemm_packed_header_t *header, const vo
+  * The alpha applied to the product is args->alpha multiplied by the alpha
+  * recorded in each packed header.
+  *
+- * Returns 0 on success. Otherwise bit 0 is set when the packed A buffer is not
+- * usable and bit 1 when the packed B buffer is not usable; both headers are
+- * checked before returning. Nothing is written to C on failure.
++ * Returns 0 on success. Otherwise GEMM_PACKED_COMPUTE_BAD_A is set when the
++ * packed A buffer is not usable and GEMM_PACKED_COMPUTE_BAD_B when the packed
++ * B buffer is not usable; both headers are checked before returning. Nothing
++ * is written to C on failure.
+  *
+  * When the single precision SBGEMM fallback is active the operands that are
+  * not packed are expanded to float and the whole product is handed to
+  * sgemm_packed_compute. An expansion that cannot be allocated leaves C
+- * untouched and reports success, as an unavailable bfloat16 kernel does.
++ * untouched and returns GEMM_PACKED_COMPUTE_NO_MEMORY, which the interface
++ * reports to the caller as OPENBLAS_GEMM_STATUS_NO_MEMORY.
+  */
+ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packed, int b_packed,
+                            XFLOAT *sa, XFLOAT *sb, unsigned int type_tag) {
+@@ -566,8 +576,8 @@ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packe
+       BLASLONG cols = product_is_empty ? 0 : (transa ? m : k);
+       a_float = sbgemm_expand_to_float(a, rows, cols, lda);
+       if (a_float == NULL) {
+-        openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
+-        return 0;
++        openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
++        return GEMM_PACKED_COMPUTE_NO_MEMORY;
+       }
+       float_args.a = (void *)a_float;
+       float_args.lda = sbgemm_expanded_ld(rows);
+@@ -578,8 +588,8 @@ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packe
+       b_float = sbgemm_expand_to_float(b, rows, cols, ldb);
+       if (b_float == NULL) {
+         free(a_float);
+-        openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
+-        return 0;
++        openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
++        return GEMM_PACKED_COMPUTE_NO_MEMORY;
+       }
+       float_args.b = (void *)b_float;
+       float_args.ldb = sbgemm_expanded_ld(rows);
+@@ -595,11 +605,11 @@ int GEMM_PACKED_COMPUTE_FN(blas_arg_t *args, int transa, int transb, int a_packe
+ 
+   if (a_packed) {
+     memcpy(&header_a, args->a, sizeof(header_a));
+-    if (gemm_packed_header_check(&header_a, args->a, GEMM_PACKED_IDENTIFIER_A, m, n, k, type_tag)) status |= 1;
++    if (gemm_packed_header_check(&header_a, args->a, GEMM_PACKED_IDENTIFIER_A, m, n, k, type_tag)) status |= GEMM_PACKED_COMPUTE_BAD_A;
+   }
+   if (b_packed) {
+     memcpy(&header_b, args->b, sizeof(header_b));
+-    if (gemm_packed_header_check(&header_b, args->b, GEMM_PACKED_IDENTIFIER_B, m, n, k, type_tag)) status |= 2;
++    if (gemm_packed_header_check(&header_b, args->b, GEMM_PACKED_IDENTIFIER_B, m, n, k, type_tag)) status |= GEMM_PACKED_COMPUTE_BAD_B;
+   }
+   if (status) return status;
+ 
+diff --git a/driver/others/CMakeLists.txt b/driver/others/CMakeLists.txt
+index 72abdc4ee..8c66c7ddf 100644
+--- a/driver/others/CMakeLists.txt
++++ b/driver/others/CMakeLists.txt
+@@ -67,6 +67,12 @@ else ()
+   list(APPEND COMMON_SOURCES parameter.c)
+ endif ()
+ 
++if (BUILD_BFLOAT16)
++  # Decides once per process whether the bfloat16 GEMM kernels can run (AMX on
++  # Sapphire Rapids) and what stands in for them otherwise.
++  list(APPEND COMMON_SOURCES sbgemm_amx.c)
++endif ()
++
+ #ifdef EXPRECISION
+ #COMMONOBJS	+= x_abs.$(SUFFIX) qlamch.$(SUFFIX) qlamc3.$(SUFFIX)
+ #endif
+diff --git a/driver/others/Makefile b/driver/others/Makefile
+index 0a1bcff9d..9eae959ec 100644
+--- a/driver/others/Makefile
++++ b/driver/others/Makefile
+@@ -44,6 +44,10 @@ else
+ COMMONOBJS	+=  parameter.$(SUFFIX)
+ endif
+ 
++ifeq ($(BUILD_BFLOAT16), 1)
++COMMONOBJS	+= sbgemm_amx.$(SUFFIX)
++endif
++
+ ifeq ($(EXPRECISION), 1)
+ COMMONOBJS	+= x_abs.$(SUFFIX) qlamch.$(SUFFIX) qlamc3.$(SUFFIX)
+ endif
+@@ -136,6 +140,9 @@ dynamic%$(PSUFFIX) : dynamic%c
+ parameter.$(SUFFIX) : parameter.c ../../param.h
+ 	$(CC) $(CFLAGS) -c $< -o $(@F)
+ 
++sbgemm_amx.$(SUFFIX) : sbgemm_amx.c
++	$(CC) $(CFLAGS) -c $< -o $(@F)
++
+ init.$(SUFFIX) : init.c
+ 	$(CC) $(CFLAGS) -c $< -o $(@F)
+ 
+diff --git a/driver/others/dynamic.c b/driver/others/dynamic.c
+index f08446c58..e87ff6766 100644
+--- a/driver/others/dynamic.c
++++ b/driver/others/dynamic.c
+@@ -409,10 +409,16 @@ int support_amx_bf16() {
+   // CPUID.7.0:EDX indicates AMX support
+   cpuid_count(7, 0, &eax, &ebx, &ecx, &edx);
+   if ((edx & BIT_AMX_TILE) && (edx & BIT_AMX_BF16)) {
+-    // CPUID.D.0:EAX[17:18] indicates AMX enabled
++    // CPUID.D.0:EAX[17:18] indicates that the CPU supports the AMX tile state
+     cpuid_count(0xd, 0, &eax, &ebx, &ecx, &edx);
+-    if ((eax & BIT_AMX_ENBD) == BIT_AMX_ENBD)
+-      ret = 1;
++    if ((eax & BIT_AMX_ENBD) == BIT_AMX_ENBD) {
++      // XCR0[17:18] indicates that the OS enabled it; a Linux kernel older
++      // than 5.16, or a Windows without AMX support, leaves both bits clear
++      // although CPUID.D.0 reports them
++      xgetbv(0, &eax, &edx);
++      if ((eax & BIT_AMX_ENBD) == BIT_AMX_ENBD)
++        ret = 1;
++    }
+   }
+   return ret;
+ #else
+@@ -426,6 +432,7 @@ extern void openblas_warning(int verbose, const char * msg);
+ #define SANDYBRIDGE_FALLBACK "OpenBLAS : Your OS does not support AVX2 instructions. OpenBLAS is using Sandybridge kernels as a fallback, which may give poorer performance.\n"
+ #define HASWELL_FALLBACK "OpenBLAS : Your OS does not support AVX512VL instructions. OpenBLAS is using Haswell kernels as a fallback, which may give poorer performance.\n"
+ #define BARCELONA_FALLBACK "OpenBLAS : Your OS does not support AVX instructions. OpenBLAS is using Barcelona kernels as a fallback, which may give poorer performance.\n"
++#define AMX_FALLBACK "OpenBLAS : Your CPU or OS does not support AMX. OpenBLAS is using the Cooperlake bfloat16 GEMM kernels as a fallback.\n"
+ 
+ static int get_vendor(void){
+   int eax, ebx, ecx, edx;
+@@ -1073,6 +1080,61 @@ char *gotoblas_corename(void) {
+   return corename[0];
+ }
+ 
++#if BUILD_BFLOAT16 == 1
++/* Gives the table in use the bfloat16 GEMM entries of the Cooperlake table,
++ * for a Sapphire Rapids whose AMX this process cannot use: the Cooperlake
++ * kernels need AVX512-BF16 only, which Sapphire Rapids has. Only the SBGEMM
++ * fields move. The rest of the table, and with it every other routine, stays
++ * the selected core's; the two param.h sections differ in more than their
++ * SBGEMM blocking, so swapping the whole table would change the SGEMM
++ * blocking under a call running in another thread. The SBGEMM fields are read
++ * only by the bfloat16 GEMM entry points, and each of those asks
++ * sbgemm_kernels_unavailable() (driver/others/sbgemm_amx.c) before reading
++ * them, which is what makes this rewrite safe. Returns 0 when done and
++ * non-zero when this build has no Cooperlake table of its own, in which case
++ * the caller computes bfloat16 products in single precision instead. */
++int gotoblas_sbgemm_use_cooperlake(void) {
++#if !defined(DYNAMIC_LIST) || defined(DYN_COOPERLAKE)
++  gotoblas_t *from = &gotoblas_COOPERLAKE;
++  gotoblas_t *to = gotoblas;
++
++  if (from == to) return 0;
++  /* init() derives sbgemm_r from the blocking of its own table. */
++  if (from -> init) from -> init();
++
++  to -> sbgemm_p         = from -> sbgemm_p;
++  to -> sbgemm_q         = from -> sbgemm_q;
++  to -> sbgemm_r         = from -> sbgemm_r;
++  to -> sbgemm_unroll_m  = from -> sbgemm_unroll_m;
++  to -> sbgemm_unroll_n  = from -> sbgemm_unroll_n;
++  to -> sbgemm_unroll_mn = from -> sbgemm_unroll_mn;
++  to -> sbgemm_align_k   = from -> sbgemm_align_k;
++  to -> sbgemm_kernel    = from -> sbgemm_kernel;
++  to -> sbgemm_beta      = from -> sbgemm_beta;
++  to -> sbgemm_incopy    = from -> sbgemm_incopy;
++  to -> sbgemm_itcopy    = from -> sbgemm_itcopy;
++  to -> sbgemm_oncopy    = from -> sbgemm_oncopy;
++  to -> sbgemm_otcopy    = from -> sbgemm_otcopy;
++#ifdef SMALL_MATRIX_OPT
++  to -> sbgemm_small_matrix_permit = from -> sbgemm_small_matrix_permit;
++  to -> sbgemm_small_kernel_nn     = from -> sbgemm_small_kernel_nn;
++  to -> sbgemm_small_kernel_nt     = from -> sbgemm_small_kernel_nt;
++  to -> sbgemm_small_kernel_tn     = from -> sbgemm_small_kernel_tn;
++  to -> sbgemm_small_kernel_tt     = from -> sbgemm_small_kernel_tt;
++  to -> sbgemm_small_kernel_b0_nn  = from -> sbgemm_small_kernel_b0_nn;
++  to -> sbgemm_small_kernel_b0_nt  = from -> sbgemm_small_kernel_b0_nt;
++  to -> sbgemm_small_kernel_b0_tn  = from -> sbgemm_small_kernel_b0_tn;
++  to -> sbgemm_small_kernel_b0_tt  = from -> sbgemm_small_kernel_b0_tt;
++#endif
++  /* Nothing left in the table needs AMX. */
++  to -> need_amxtile_permission = 0;
++  return 0;
++#else
++  return -1;
++#endif
++}
++#endif
++
+ 
+ 
+ static gotoblas_t *force_coretype(char *coretype){
+@@ -1082,7 +1144,7 @@ static gotoblas_t *force_coretype(char *coretype){
+ 	char message[128];
+ 	//char mname[20];
+ 
+-	for ( i=1 ; i <= 25; i++)
++	for ( i=1 ; i <= 26; i++)
+ 	{
+ 		if (!strncasecmp(coretype,corename[i],20))
+ 		{
+@@ -1100,6 +1162,7 @@ static gotoblas_t *force_coretype(char *coretype){
+ 
+ 	switch (found)
+ 	{
++		case 26: return (&gotoblas_SAPPHIRERAPIDS);
+ 		case 25: return (&gotoblas_COOPERLAKE);
+ 		case 24: return (&gotoblas_SKYLAKEX);	
+ 		case 23: return (&gotoblas_ZEN);
+@@ -1183,6 +1246,20 @@ void gotoblas_dynamic_init(void) {
+     exit(1);
+   }
+ 
++#if BUILD_BFLOAT16 == 1
++  /* get_coretype() asks support_amx_bf16() before it chooses Sapphire Rapids;
++   * force_coretype() does not, so OPENBLAS_CORETYPE=SapphireRapids on a host
++   * or OS without AMX would run the AMX kernels. Take the Cooperlake bfloat16
++   * GEMM entries now, so that they never run. The per-process permission that
++   * Linux adds on top is asked for lazily, on the first bfloat16 GEMM, by
++   * driver/others/sbgemm_amx.c, which rewrites the table the same way. */
++  if (gotoblas -> need_amxtile_permission && !support_amx_bf16()) {
++    if (gotoblas_sbgemm_use_cooperlake() == 0) {
++      openblas_warning(FALLBACK_VERBOSE, AMX_FALLBACK);
++    }
++  }
++#endif
++
+ }
+ 
+ void gotoblas_dynamic_quit(void) {
+diff --git a/driver/others/sbgemm_amx.c b/driver/others/sbgemm_amx.c
+new file mode 100644
+index 000000000..7f75a2370
+--- /dev/null
++++ b/driver/others/sbgemm_amx.c
+@@ -0,0 +1,178 @@
++/*********************************************************************/
++/* Copyright 2026 The OpenBLAS Project                               */
++/* All rights reserved.                                              */
++/*                                                                   */
++/* Redistribution and use in source and binary forms, with or        */
++/* without modification, are permitted provided that the following   */
++/* conditions are met:                                               */
++/*                                                                   */
++/*   1. Redistributions of source code must retain the above         */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer.                                                  */
++/*                                                                   */
++/*   2. Redistributions in binary form must reproduce the above      */
++/*      copyright notice, this list of conditions and the following  */
++/*      disclaimer in the documentation and/or other materials       */
++/*      provided with the distribution.                              */
++/*                                                                   */
++/*    THIS SOFTWARE IS PROVIDED BY THE OPENBLAS PROJECT ``AS IS''    */
++/*    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      */
++/*    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND      */
++/*    FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT   */
++/*    SHALL THE OPENBLAS PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY   */
++/*    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR           */
++/*    CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,          */
++/*    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,      */
++/*    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED     */
++/*    AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT    */
++/*    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)         */
++/*    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF    */
++/*    ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.                     */
++/*********************************************************************/
++
++/*
++ * Decides, once per process, whether the bfloat16 GEMM kernels of the core in
++ * use can run, and what takes their place when they cannot.
++ *
++ * Only the Sapphire Rapids kernels have a condition beyond the instruction
++ * set. They use AMX tile instructions, which the OS has to enable (XCR0 bits
++ * 17 and 18) and which Linux grants per process through
++ * arch_prctl(ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA); a kernel older than
++ * 5.16, or a container that filters the syscall, refuses. Upstream asks on the
++ * first SBGEMM call and, when refused, prints a message and returns without
++ * computing anything.
++ *
++ * The request stays lazy here, so a process that never touches bfloat16 gets
++ * no AMX permission and none of its side effects (the kernel sizes signal
++ * frames for the permitted features), but the product is never given up:
++ *
++ *   - DYNAMIC_ARCH: the bfloat16 GEMM entries of the table in use are
++ *     replaced by Cooperlake's, whose kernels need AVX512-BF16 only
++ *     (gotoblas_sbgemm_use_cooperlake() in dynamic.c). Nothing else in the
++ *     table changes, so every other routine, including one running in another
++ *     thread at that moment, is unaffected. The SBGEMM fields are read only
++ *     by the bfloat16 GEMM entry points, and each of those calls
++ *     sbgemm_kernels_unavailable() before it reads any of them, so no caller
++ *     can see the fields half way through the rewrite.
++ *   - Otherwise (a static SAPPHIRERAPIDS build, or a DYNAMIC_LIST build with
++ *     no Cooperlake table of its own) the caller is told that the kernels are
++ *     unavailable, and the single precision fallback of common_sbfallback.h
++ *     computes the product with the SGEMM kernels, which need AVX512 only.
++ *
++ * The answer is cached, so a pack and the compute that follows cannot disagree
++ * about the layout of a packed buffer.
++ */
++
++#include "common.h"
++
++extern void openblas_warning(int verbose, const char *msg);
++
++#if defined(ARCH_X86_64) && defined(BUILD_BFLOAT16)
++
++#if defined(__linux__)
++#include <unistd.h>
++#include <sys/syscall.h>
++#ifndef ARCH_REQ_XCOMP_PERM
++#define ARCH_REQ_XCOMP_PERM 0x1023
++#endif
++#ifndef XFEATURE_XTILEDATA
++#define XFEATURE_XTILEDATA 18
++#endif
++#endif
++
++#define SBGEMM_AMX_UNRESOLVED  0
++#define SBGEMM_AMX_READY       1
++#define SBGEMM_AMX_UNAVAILABLE 2
++
++static volatile int sbgemm_amx_state = SBGEMM_AMX_UNRESOLVED;
++static volatile BLASULONG sbgemm_amx_lock = 0;
++
++#if defined(DYNAMIC_ARCH)
++
++/* Both live in dynamic.c: the CPUID / XCR0 probe that get_coretype() uses,
++ * and the rewrite of the bfloat16 GEMM entries. */
++extern int support_amx_bf16(void);
++extern int gotoblas_sbgemm_use_cooperlake(void);
++#define sbgemm_amx_supported support_amx_bf16
++
++#elif defined(SAPPHIRERAPIDS)
++
++/* The static build has no dynamic.c. The probe repeats what
++ * support_amx_bf16() there asks: AMX-TILE and AMX-BF16 in CPUID.7.0:EDX, and
++ * the tile state enabled by the OS in XCR0. */
++static int sbgemm_amx_supported(void) {
++  int eax, ebx, ecx, edx;
++
++  cpuid(1, &eax, &ebx, &ecx, &edx);
++  if ((ecx & (1 << 27)) == 0) return 0; /* OSXSAVE, needed for xgetbv */
++  cpuid_count(7, 0, &eax, &ebx, &ecx, &edx);
++  if ((edx & (1 << 24)) == 0 || (edx & (1 << 22)) == 0) return 0;
++  __asm__ __volatile__(".byte 0x0f, 0x01, 0xd0" : "=a"(eax), "=d"(edx) : "c"(0) : "cc");
++  return (eax & 0x00060000) == 0x00060000;
++}
++
++#endif
++
++#if defined(DYNAMIC_ARCH) || defined(SAPPHIRERAPIDS)
++/* Non-zero when this process may execute AMX tile instructions. */
++static int sbgemm_amx_usable(void) {
++  if (!sbgemm_amx_supported()) return 0;
++#if defined(__linux__)
++  if (syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA) != 0) return 0;
++#endif
++  return 1;
++}
++#endif
++
++static int sbgemm_amx_resolve(void) {
++#if defined(DYNAMIC_ARCH)
++  if (gotoblas == NULL) gotoblas_dynamic_init();
++  if (!gotoblas->need_amxtile_permission) return SBGEMM_AMX_READY;
++  if (sbgemm_amx_usable()) return SBGEMM_AMX_READY;
++
++  if (gotoblas_sbgemm_use_cooperlake() == 0) {
++    openblas_warning(1, "OpenBLAS : AMX is not available to this process. Using the Cooperlake bfloat16 GEMM kernels instead.\n");
++    return SBGEMM_AMX_READY;
++  }
++  openblas_warning(0, "OpenBLAS : AMX is not available to this process, and this build has no other bfloat16 kernel.\n");
++  return SBGEMM_AMX_UNAVAILABLE;
++#elif defined(SAPPHIRERAPIDS)
++  if (sbgemm_amx_usable()) return SBGEMM_AMX_READY;
++  openblas_warning(0, "OpenBLAS : AMX is not available to this process, so the Sapphire Rapids bfloat16 kernels cannot run.\n");
++  return SBGEMM_AMX_UNAVAILABLE;
++#else
++  return SBGEMM_AMX_READY;
++#endif
++}
++
++/*
++ * Returns 0 when the bfloat16 GEMM kernels of the core in use may run, after
++ * replacing them with Cooperlake's if that is what it takes, and non-zero when
++ * they cannot run in this process at all. The callers then take the single
++ * precision fallback of common_sbfallback.h where it is compiled in, and
++ * otherwise return without touching their output.
++ */
++int sbgemm_kernels_unavailable(void) {
++  int state = sbgemm_amx_state;
++
++  if (state == SBGEMM_AMX_UNRESOLVED) {
++    blas_lock(&sbgemm_amx_lock);
++    state = sbgemm_amx_state;
++    if (state == SBGEMM_AMX_UNRESOLVED) {
++      state = sbgemm_amx_resolve();
++      /* The table must be complete before anyone can see the state. */
++      MB;
++      sbgemm_amx_state = state;
++    }
++    blas_unlock(&sbgemm_amx_lock);
++  }
++  return state == SBGEMM_AMX_UNAVAILABLE;
++}
++
++#else /* not x86-64, or no bfloat16 */
++
++int sbgemm_kernels_unavailable(void) {
++  return 0;
++}
++
++#endif
+diff --git a/exports/gensymbol b/exports/gensymbol
+index b19d325cb..0c67aa594 100755
+--- a/exports/gensymbol
++++ b/exports/gensymbol
+@@ -130,7 +130,7 @@ cblasobjsz="
+ 
+ cblasobjs="cblas_xerbla"
+ 
+-bfcblasobjs="cblas_sbgemm cblas_sbgemv cblas_sbdot cblas_sbstobf16 cblas_sbdtobf16 cblas_sbf16tos cblas_dbf16tod cblas_sbgemm_batch cblas_sbgemm_pack_get_size cblas_sbgemm_pack cblas_sbgemm_compute"
++bfcblasobjs="cblas_sbgemm cblas_sbgemv cblas_sbdot cblas_sbstobf16 cblas_sbdtobf16 cblas_sbf16tos cblas_dbf16tod cblas_sbgemm_batch cblas_sbgemm_pack_get_size cblas_sbgemm_pack cblas_sbgemm_compute cblas_sbgemm_status"
+ hfcblasobjs="cblas_shgemm"
+ 
+ exblasobjs="
+diff --git a/exports/gensymbol.pl b/exports/gensymbol.pl
+index de63cd01b..074b4ccd0 100644
+--- a/exports/gensymbol.pl
++++ b/exports/gensymbol.pl
+@@ -128,7 +128,7 @@
+ @cblasobjs = (  cblas_xerbla );
+ 
+ @bfcblasobjs = (cblas_sbgemm, cblas_sbgemmt, cblas_sbgemmtr, cblas_sbgemv, cblas_sbdot, cblas_sbstobf16, cblas_sbdtobf16, cblas_sbf16tos, cblas_dbf16tod, cblas_sbgemm_batch,
+-    cblas_sbgemm_pack_get_size, cblas_sbgemm_pack, cblas_sbgemm_compute);
++    cblas_sbgemm_pack_get_size, cblas_sbgemm_pack, cblas_sbgemm_compute, cblas_sbgemm_status);
+ @hfcblasobjs = (cblas_shgemm);
+ @exblasobjs = (
+     qamax,qamin,qasum,qaxpy,qcabs1,qcopy,qdot,qgbmv,qgemm,
+diff --git a/interface/gemm.c b/interface/gemm.c
+index 9b1e18863..6c219b43d 100644
+--- a/interface/gemm.c
++++ b/interface/gemm.c
+@@ -168,21 +168,17 @@ static size_t zgemm_small_kernel_b0[] = {
+ #endif
+ #endif
+ 
+-#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
+-#define XFEATURE_XTILEDATA 18
+-#define ARCH_REQ_XCOMP_PERM 0x1023
+-static int openblas_amxtile_permission = 0;
+-static int init_amxtile_permission() {
+-  long status =
+-      syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA);
+-  if (status != 0) {
+-    fprintf(stderr, "XTILEDATA permission not granted in your device(Linux, "
+-                    "Intel Sapphier Rapids), skip sbgemm calculation\n");
+-    return -1;
+-  }
+-  openblas_amxtile_permission = 1;
+-  return 0;
+-}
++/* cblas_sbgemm_status is cblas_sbgemm with a return value (cblas.h,
++ * OPENBLAS_GEMM_STATUS_*). The two share the body below, so every exit from
++ * it goes through GEMM_RETURN; for the other entry points, which return
++ * nothing, the macro drops its argument. */
++#if defined(CBLAS) && defined(BFLOAT16) && !defined(BGEMM)
++#define GEMM_STATUS_CONCAT_(a, b) a##b
++#define GEMM_STATUS_CONCAT(a, b) GEMM_STATUS_CONCAT_(a, b)
++#define GEMM_STATUS_NAME GEMM_STATUS_CONCAT(CNAME, _status)
++#define GEMM_RETURN(status) return (status)
++#else
++#define GEMM_RETURN(status) return
+ #endif
+ 
+ #ifdef DYNAMIC_ARCH
+@@ -369,6 +365,36 @@ void NAME(char *TRANSA, char *TRANSB,
+ 
+ #else
+ 
++#ifdef GEMM_STATUS_NAME
++
++int GEMM_STATUS_NAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANSPOSE TransB,
++	   blasint m, blasint n, blasint k,
++	   FLOAT alpha,
++	   IFLOAT *a, blasint lda,
++	   IFLOAT *b, blasint ldb,
++	   FLOAT beta,
++	   FLOAT *c, blasint ldc);
++
++void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANSPOSE TransB,
++	   blasint m, blasint n, blasint k,
++	   FLOAT alpha,
++	   IFLOAT *a, blasint lda,
++	   IFLOAT *b, blasint ldb,
++	   FLOAT beta,
++	   FLOAT *c, blasint ldc) {
++  (void)GEMM_STATUS_NAME(order, TransA, TransB, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
++}
++
++int GEMM_STATUS_NAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANSPOSE TransB,
++	   blasint m, blasint n, blasint k,
++	   FLOAT alpha,
++	   IFLOAT *a, blasint lda,
++	   IFLOAT *b, blasint ldb,
++	   FLOAT beta,
++	   FLOAT *c, blasint ldc) {
++
++#else /* GEMM_STATUS_NAME */
++
+ void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANSPOSE TransB,
+ 	   blasint m, blasint n, blasint k,
+ #ifndef COMPLEX
+@@ -390,6 +416,8 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANS
+   FLOAT *c = (FLOAT*) vc;
+ #endif
+ 
++#endif /* GEMM_STATUS_NAME */
++
+   blas_arg_t args;
+   int transa, transb;
+   blasint nrowa, nrowb, info;
+@@ -539,11 +567,13 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANS
+ 
+   if (info >= 0) {
+     BLASFUNC(xerbla)(ERROR_NAME, &info, sizeof(ERROR_NAME));
+-    return;
++    /* An order that is neither row nor column major leaves info at 0, which
++     * xerbla reports as parameter 0; the status names the order argument. */
++    GEMM_RETURN(info == 0 ? 1 : info);
+   }
+ 
+ 
+-  if ((args.m == 0) || (args.n == 0)) return;
++  if ((args.m == 0) || (args.n == 0)) GEMM_RETURN(0);
+ #if !defined(COMPLEX) && !defined(DOUBLE) && !defined(BFLOAT16)  && !defined(HFLOAT16)
+ #if defined(ARCH_x86) && (defined(USE_SGEMM_KERNEL_DIRECT)||defined(DYNAMIC_ARCH))
+ #if defined(DYNAMIC_ARCH)
+@@ -551,7 +581,7 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANS
+ #endif
+   if (order == CblasRowMajor && beta == 0 && alpha == 1.0 && TransA == CblasNoTrans && TransB == CblasNoTrans && SGEMM_DIRECT_PERFORMANT(m,n,k)) {
+         SGEMM_DIRECT(m, n, k, a, lda, b, ldb, c, ldc);
+-        return;
++        GEMM_RETURN(0);
+   }
+ #endif
+ #if defined(ARCH_ARM64) && (defined(USE_SGEMM_KERNEL_DIRECT)||defined(DYNAMIC_ARCH))
+@@ -565,12 +595,12 @@ if (strcmp(gotoblas_corename(), "armv9sme") == 0
+ #endif
+   if (order == CblasRowMajor && k==lda && n==ldb && n==ldc && beta == 0 && alpha == 1.0 && TransA == CblasNoTrans && TransB == CblasNoTrans && SGEMM_DIRECT_PERFORMANT(m,n,k)) {
+         SGEMM_DIRECT(m, n, k, a, lda, b, ldb, c, ldc);
+-        return;
++        GEMM_RETURN(0);
+   }
+ else
+  if (order == CblasRowMajor && k==lda && n==ldb && n==ldc && TransA == CblasNoTrans && TransB == CblasNoTrans && SGEMM_DIRECT_PERFORMANT(m,n,k)) {
+         SGEMM_DIRECT_ALPHA_BETA(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+-        return;
++        GEMM_RETURN(0);
+   }
+ 
+ #endif
+@@ -578,21 +608,23 @@ else
+ 
+ #endif
+ 
+-#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
+-#if defined(DYNAMIC_ARCH)
+-  if (gotoblas->need_amxtile_permission &&
+-      openblas_amxtile_permission == 0 && init_amxtile_permission() == -1) {
+-    return;
+-  }
++#if defined(BFLOAT16) && !defined(BGEMM) && defined(ARCH_X86_64)
++  /* The Sapphire Rapids SBGEMM kernels need AMX, which the OS or, on Linux,
++   * the kernel's per-process permission may withhold. (BGEMM has no AMX
++   * kernel and is left alone.) sbgemm_kernels_unavailable()
++   * (driver/others/sbgemm_amx.c) replaces the kernels with Cooperlake's when
++   * the build has that table; when it has not, the single precision fallback
++   * below takes over where it is compiled in, and otherwise the call does
++   * nothing, as upstream did. Either way it runs before any SBGEMM parameter
++   * of the table is read. */
++#if defined(SBGEMM_FLOAT_FALLBACK)
++  (void)sbgemm_kernels_unavailable();
++#else
++  if (sbgemm_kernels_unavailable()) GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_KERNEL);
+ #endif
+-#if !defined(DYNAMIC_ARCH) && defined(SAPPHIRERAPIDS)
+-  if (openblas_amxtile_permission == 0 && init_amxtile_permission() == -1) {
+-    return;
+-  }
+ #endif
+-#endif  // defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
+ 
+-  if ((args.m == 0) || (args.n == 0)) return;
++  if ((args.m == 0) || (args.n == 0)) GEMM_RETURN(0);
+ 
+ #if 0
+   fprintf(stderr, "m = %4d  n = %d  k = %d  lda = %4d  ldb = %4d  ldc = %4d\n",
+@@ -622,15 +654,13 @@ else
+     if (a_float == NULL || b_float == NULL) {
+       free(a_float);
+       free(b_float);
+-      /* C is left untouched, as it is when the Sapphire Rapids kernels cannot
+-       * obtain AMX tile permission above. */
+-      openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
+-      return;
++      /* C is left untouched. cblas_sbgemm_status reports it; cblas_sbgemm and
++       * sbgemm_ have only the message. */
++      openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
++      GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
+     }
+ 
+     {
+-      char sgemm_transa = transa ? 'T' : 'N';
+-      char sgemm_transb = transb ? 'T' : 'N';
+       blasint sgemm_m   = (blasint)args.m;
+       blasint sgemm_n   = (blasint)args.n;
+       blasint sgemm_k   = product_is_empty ? 0 : (blasint)args.k;
+@@ -638,14 +668,27 @@ else
+       blasint sgemm_ldb = (blasint)sbgemm_expanded_ld(b_rows);
+       blasint sgemm_ldc = (blasint)args.ldc;
+ 
++      /* args is in the internal column-major orientation, so the product goes
++       * to the column-major SGEMM of the same interface as this entry point:
++       * a NO_FBLAS (ONLY_CBLAS) build has no sgemm_, and a NO_CBLAS build has
++       * no cblas_sgemm, but each has the one its sbgemm was compiled for. */
++#ifdef CBLAS
++      cblas_sgemm(CblasColMajor, transa ? CblasTrans : CblasNoTrans, transb ? CblasTrans : CblasNoTrans,
++                  sgemm_m, sgemm_n, sgemm_k, sgemm_alpha, a_float, sgemm_lda, b_float, sgemm_ldb,
++                  sgemm_beta, (float *)args.c, sgemm_ldc);
++#else
++      char sgemm_transa = transa ? 'T' : 'N';
++      char sgemm_transb = transb ? 'T' : 'N';
++
+       BLASFUNC(sgemm)(&sgemm_transa, &sgemm_transb, &sgemm_m, &sgemm_n, &sgemm_k,
+                       &sgemm_alpha, a_float, &sgemm_lda, b_float, &sgemm_ldb,
+                       &sgemm_beta, (float *)args.c, &sgemm_ldc);
++#endif
+     }
+ 
+     free(a_float);
+     free(b_float);
+-    return;
++    GEMM_RETURN(0);
+   }
+ #endif
+ 
+@@ -692,7 +735,7 @@ else
+       bool is_efficient_gemv = have_tuned_gemv || ((NT == 'N') || (NT == 'T' && inc_x == 1));
+       if (is_efficient_gemv) {
+         GEMV(&NT, &m, &n, args.alpha, args.a, &lda, args.b, &inc_x, args.beta, args.c, &inc_y);
+-        return;
++        GEMM_RETURN(0);
+       }
+     }
+     if (args.m == 1) {
+@@ -715,7 +758,7 @@ else
+       bool is_efficient_gemv = have_tuned_gemv || ((NT == 'N' && inc_y == 1) || (NT == 'T' && inc_x == 1));
+       if (is_efficient_gemv) {
+         GEMV(&NT, &m, &n, args.alpha, args.b, &ldb, args.a, &inc_x, args.beta, args.c, &inc_y);
+-        return;
++        GEMM_RETURN(0);
+       }
+     }
+   }
+@@ -733,7 +776,7 @@ else
+ 	  }else{
+ 		(GEMM_SMALL_KERNEL((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, *(FLOAT *)(args.beta), args.c, args.ldc);
+ 	  }
+-	  return;
++	  GEMM_RETURN(0);
+   }
+ #else
+   if(GEMM_SMALL_MATRIX_PERMIT(transa, transb, args.m, args.n, args.k, alpha[0], alpha[1], beta[0], beta[1])){
+@@ -742,7 +785,7 @@ else
+ 	  }else{
+ 		(ZGEMM_SMALL_KERNEL((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, alpha[0], alpha[1], args.b, args.ldb, beta[0], beta[1], args.c, args.ldc);
+ 	  }
+-	  return;
++	  GEMM_RETURN(0);
+   }
+ #endif
+ #endif
+@@ -818,5 +861,5 @@ else
+ 
+   IDEBUG_END;
+ 
+-  return;
++  GEMM_RETURN(0);
+ }
+diff --git a/interface/gemm_compute.c b/interface/gemm_compute.c
+index 1039564d2..aa899855c 100644
+--- a/interface/gemm_compute.c
++++ b/interface/gemm_compute.c
+@@ -33,8 +33,8 @@
+ /*
+  * cblas_?gemm_compute: the last third of the MKL-style packed GEMM API.
+  *
+- *   cblas_?gemm_compute(order, transa, transb, m, n, k,
+- *                       a, lda, b, ldb, beta, c, ldc)
++ *   status = cblas_?gemm_compute(order, transa, transb, m, n, k,
++ *                                a, lda, b, ldb, beta, c, ldc)
+  *
+  * transa and transb accept the CBLAS_TRANSPOSE values or CblasPacked. A
+  * CblasPacked operand points at a buffer filled by cblas_?gemm_pack with the
+@@ -49,18 +49,23 @@
+  * The scratch buffer for the operand that is not packed comes from
+  * blas_memory_alloc, exactly as for a regular GEMM, so concurrent calls from
+  * several threads are safe and may share one read-only packed buffer.
++ *
++ * Returns 0 when C was updated. Otherwise C is untouched and the value says
++ * why: the number of the rejected argument (a packed buffer that does not fit
++ * the product is reported at its argument position, 7 or 9), or one of the
++ * negative OPENBLAS_GEMM_STATUS_* codes of cblas.h. MKL declares the routine
++ * void; callers written for MKL may keep ignoring the result.
+  */
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include "common.h"
+-#include "common_sbfallback.h"
+ #include "gemm_packed_common.h"
+ 
+ #define ERROR_NAME GEMM_PACKED_PREFIX "_COMPUTE "
+ 
+-void CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, blasint n, blasint k,
+-           IFLOAT *a, blasint lda, IFLOAT *b, blasint ldb, FLOAT beta, FLOAT *c, blasint ldc) {
++int CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, blasint n, blasint k,
++          IFLOAT *a, blasint lda, IFLOAT *b, blasint ldb, FLOAT beta, FLOAT *c, blasint ldc) {
+   blas_arg_t args;
+   blasint info = 0;
+   int a_packed, b_packed, ta, tb;
+@@ -148,12 +153,12 @@ void CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, bl
+ 
+   if (info) {
+     BLASFUNC(xerbla)(ERROR_NAME, &info, sizeof(ERROR_NAME));
+-    return;
++    return (int)info;
+   }
+ 
+-  if ((args.m == 0) || (args.n == 0)) return;
++  if ((args.m == 0) || (args.n == 0)) return 0;
+ 
+-  if (gemm_packed_kernels_ready() != 0) return;
++  if (gemm_packed_kernels_ready() != 0) return OPENBLAS_GEMM_STATUS_NO_KERNEL;
+ 
+   buffer = (XFLOAT *)blas_memory_alloc(0);
+ 
+@@ -177,12 +182,22 @@ void CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, bl
+ 
+   blas_memory_free(buffer);
+ 
+-  if (status != 0) {
+-    /* Bit 0: the internal A buffer was rejected, bit 1: the internal B buffer.
+-     * Map back to the user's operand positions a (7) and b (9) and report the
+-     * lower one, as the argument checks above do. */
+-    int user_a_bad = row_major ? (status & 2) : (status & 1);
++  if (status == 0) return 0;
++
++  if (status & GEMM_PACKED_COMPUTE_NO_MEMORY) {
++    /* The float expansion of the single precision SBGEMM fallback could not
++     * be allocated. The driver has said so; this is not an argument error, so
++     * xerbla is not involved. */
++    return OPENBLAS_GEMM_STATUS_NO_MEMORY;
++  }
++
++  /* Bit 0: the internal A buffer was rejected, bit 1: the internal B buffer.
++   * Map back to the user's operand positions a (7) and b (9) and report the
++   * lower one, as the argument checks above do. */
++  {
++    int user_a_bad = row_major ? (status & GEMM_PACKED_COMPUTE_BAD_B) : (status & GEMM_PACKED_COMPUTE_BAD_A);
+     info = user_a_bad ? 7 : 9;
+     BLASFUNC(xerbla)(ERROR_NAME, &info, sizeof(ERROR_NAME));
++    return (int)info;
+   }
+ }
+diff --git a/interface/gemm_pack.c b/interface/gemm_pack.c
+index 2ddeb84ce..c7ceac9b6 100644
+--- a/interface/gemm_pack.c
++++ b/interface/gemm_pack.c
+@@ -36,13 +36,21 @@
+  * defined and CNAME set to cblas_sgemm_pack, cblas_dgemm_pack, or
+  * cblas_sbgemm_pack; the _get_size entry point derives its name from CNAME.
+  *
+- *   size = cblas_?gemm_pack_get_size(identifier, m, n, k)
+- *   cblas_?gemm_pack(order, identifier, trans, m, n, k, alpha, src, ld, dest)
++ *   size   = cblas_?gemm_pack_get_size(identifier, m, n, k)
++ *   status = cblas_?gemm_pack(order, identifier, trans, m, n, k, alpha, src, ld, dest)
+  *
+  * The packed buffer records alpha; the product computed later by
+  * cblas_?gemm_compute is alpha * op(A) * op(B) + beta * C, with alpha taken
+  * from the packed operand(s). When both operands are packed the two recorded
+  * alphas are multiplied.
++ *
++ * cblas_?gemm_pack returns 0 when dest was packed. Otherwise the value says
++ * why not: the number of the rejected argument, or one of the negative
++ * OPENBLAS_GEMM_STATUS_* codes of cblas.h. A rejected argument and
++ * OPENBLAS_GEMM_STATUS_TOO_LARGE leave dest untouched; the other failures
++ * happen after writing began and leave no valid header behind, so that a
++ * later cblas_?gemm_compute rejects the buffer. MKL declares the routine void;
++ * callers written for MKL may keep ignoring the result.
+  */
+ 
+ #include <stdio.h>
+@@ -73,6 +81,12 @@ size_t GEMM_PACK_GET_SIZE_NAME(enum CBLAS_IDENTIFIER identifier, blasint m, blas
+     return 0;
+   }
+ 
++  gemm_packed_ensure_initialized();
++  /* The size follows the blocking of the kernels that will pack, so the
++   * bfloat16 kernel question is settled first. A size is still returned when
++   * the kernels cannot run; cblas_?gemm_pack reports that. */
++  (void)gemm_packed_kernels_ready();
++
+   extent = (identifier == CblasAMatrix) ? (BLASLONG)m : (BLASLONG)n;
+   bytes = GEMM_PACKED_SIZE(extent, (BLASLONG)k);
+   if (bytes == 0) {
+@@ -84,8 +98,8 @@ size_t GEMM_PACK_GET_SIZE_NAME(enum CBLAS_IDENTIFIER identifier, blasint m, blas
+   return bytes;
+ }
+ 
+-void CNAME(enum CBLAS_ORDER order, enum CBLAS_IDENTIFIER identifier, enum CBLAS_TRANSPOSE trans,
+-           blasint m, blasint n, blasint k, FLOAT alpha, IFLOAT *src, blasint ld, IFLOAT *dest) {
++int CNAME(enum CBLAS_ORDER order, enum CBLAS_IDENTIFIER identifier, enum CBLAS_TRANSPOSE trans,
++          blasint m, blasint n, blasint k, FLOAT alpha, IFLOAT *src, blasint ld, IFLOAT *dest) {
+   blasint info = 0;
+   int internal_identifier = -1;
+   int internal_trans, status;
+@@ -128,26 +142,41 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_IDENTIFIER identifier, enum CBLAS_
+ 
+   if (info) {
+     BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
+-    return;
++    return (int)info;
+   }
+ 
++  gemm_packed_ensure_initialized();
++
+   if (gemm_packed_kernels_ready() != 0) {
+-    /* The bfloat16 kernels cannot run in this process (see interface/gemm.c,
+-     * which skips the computation the same way). Leave no valid header behind,
+-     * so that a later cblas_?gemm_compute rejects the buffer instead of
+-     * reading stale panels. */
++    /* The bfloat16 kernels cannot run in this process and nothing stands in
++     * for them (see interface/gemm.c, which gives up the same way). Leave no
++     * valid header behind, so that a later cblas_?gemm_compute rejects the
++     * buffer instead of reading stale panels. */
+     memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
+-    return;
++    return OPENBLAS_GEMM_STATUS_NO_KERNEL;
+   }
+ 
+   status = GEMM_PACKED_PACK(internal_identifier, internal_trans, internal_m, internal_n, (BLASLONG)k,
+                             alpha, src, (BLASLONG)ld, (void *)dest);
+-  if (status != 0) {
+-    /* 2: the packed size does not fit, so cblas_?gemm_pack_get_size had
+-     * returned 0 for these dimensions; 3: internal layout inconsistency;
+-     * 4: the float expansion of the single precision SBGEMM fallback could
+-     * not be allocated. */
+-    info = 0;
+-    BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
++  switch (status) {
++    case 0:
++      return 0;
++    case 4:
++      /* The float expansion of the single precision SBGEMM fallback could not
++       * be allocated. The driver has said so and zeroed the header; this is
++       * not an argument error, so xerbla is not involved. */
++      return OPENBLAS_GEMM_STATUS_NO_MEMORY;
++    case 2:
++      /* The packed size does not fit, so cblas_?gemm_pack_get_size had
++       * returned 0 for these dimensions. */
++      info = 0;
++      BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
++      return OPENBLAS_GEMM_STATUS_TOO_LARGE;
++    default:
++      /* 3: the panels written disagree with the size computed in closed form;
++       * 1 cannot happen after the checks above. Both are internal errors. */
++      info = 0;
++      BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
++      return OPENBLAS_GEMM_STATUS_INTERNAL;
+   }
+ }
+diff --git a/interface/gemm_packed_common.h b/interface/gemm_packed_common.h
+index d92c018cc..fcb5036a5 100644
+--- a/interface/gemm_packed_common.h
++++ b/interface/gemm_packed_common.h
+@@ -38,6 +38,7 @@
+ 
+ #include <stdio.h>
+ #include "common.h"
++#include "common_sbfallback.h"
+ 
+ #if defined(COMPLEX) || defined(XDOUBLE) || defined(HFLOAT16) || defined(BGEMM)
+ #error "the packed GEMM interface supports SGEMM, DGEMM, and SBGEMM only"
+@@ -86,45 +87,33 @@ static inline int gemm_packed_trans_code(blasint trans) {
+   }
+ }
+ 
+-/* AMX tile data must be enabled per process on Linux before the Sapphire
+- * Rapids SBGEMM copy and compute kernels may touch tile registers. This is the
+- * same request interface/gemm.c makes. Returns 0 when the kernels may run. */
+-#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
+-#include <unistd.h>
+-#include <sys/syscall.h>
+-#ifndef XFEATURE_XTILEDATA
+-#define XFEATURE_XTILEDATA 18
++/* Under DYNAMIC_ARCH the blocking parameters live in the gotoblas table,
++ * which a constructor fills before main() with GCC and clang. MSVC has no
++ * constructor, and there the table is filled by the first blas_memory_alloc();
++ * cblas_?gemm_pack_get_size never allocates, so it fills the table itself if
++ * it is the first call into the library. */
++static inline void gemm_packed_ensure_initialized(void) {
++#ifdef DYNAMIC_ARCH
++  if (gotoblas == NULL) gotoblas_dynamic_init();
+ #endif
+-#ifndef ARCH_REQ_XCOMP_PERM
+-#define ARCH_REQ_XCOMP_PERM 0x1023
+-#endif
+-/* The permission is granted per process (Documentation/arch/x86/xstate.rst),
+- * so a successful request is remembered. The flag is only ever set to 1 and
+- * read with relaxed atomics, so concurrent first calls at worst repeat the
+- * request, which the kernel answers with success. */
+-static int gemm_packed_amxtile_permission = 0;
+-
+-static inline int gemm_packed_request_amxtile(void) {
+-  long status;
+-  if (__atomic_load_n(&gemm_packed_amxtile_permission, __ATOMIC_RELAXED)) return 0;
+-  status = syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA);
+-  if (status != 0) {
+-    fprintf(stderr, "XTILEDATA permission not granted in your device(Linux, "
+-                    "Intel Sapphier Rapids), skip sbgemm calculation\n");
+-    return -1;
+-  }
+-  __atomic_store_n(&gemm_packed_amxtile_permission, 1, __ATOMIC_RELAXED);
+-  return 0;
+ }
+-#endif
+ 
++/* Returns 0 when the entry point may go on: the bfloat16 kernels of the core
++ * in use can run (sbgemm_kernels_unavailable() first replaces them with
++ * Cooperlake's when that is what it takes), or the single precision fallback
++ * of common_sbfallback.h stands in for them. Non-zero only when neither
++ * holds; the caller then returns OPENBLAS_GEMM_STATUS_NO_KERNEL. Always 0 for
++ * SGEMM and DGEMM. Every bfloat16 entry point, cblas_sbgemm_pack_get_size
++ * included, calls this before it reads an SBGEMM blocking parameter. */
+ static inline int gemm_packed_kernels_ready(void) {
+-#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
+-#if defined(DYNAMIC_ARCH)
+-  if (gotoblas->need_amxtile_permission && gemm_packed_request_amxtile() == -1) return -1;
+-#elif defined(SAPPHIRERAPIDS)
+-  if (gemm_packed_request_amxtile() == -1) return -1;
++#if defined(BFLOAT16) && defined(ARCH_X86_64)
++  if (sbgemm_kernels_unavailable()) {
++#if defined(SBGEMM_FLOAT_FALLBACK)
++    return 0;
++#else
++    return -1;
+ #endif
++  }
+ #endif
+   return 0;
+ }
+diff --git a/kernel/setparam-ref.c b/kernel/setparam-ref.c
+index 7faa030a3..3b3bdc86b 100644
+--- a/kernel/setparam-ref.c
++++ b/kernel/setparam-ref.c
+@@ -2101,9 +2101,7 @@ static void init_parameter(void) {
+  * "cooperlake" / "skylakex" / "sapphirerapids" while the x86-64 corename[]
+  * table in driver/others/dynamic.c holds "Cooperlake" / "SkylakeX" /
+  * "SapphireRapids", so the strcmp never matches and the tuning is lost
+- * everywhere. A run time gate on that name would also inherit the loop bound
+- * in force_coretype(), which stops at corename[25] and so can never report
+- * "SapphireRapids". This file is compiled once per core, and only under
++ * everywhere. This file is compiled once per core, and only under
+  * DYNAMIC_ARCH, so the whitelist is a compile time question either way.
+  */
+ #if defined(COOPERLAKE) || defined(SKYLAKEX) || defined(SAPPHIRERAPIDS)
+diff --git a/utest/test_extensions/test_dgemm_pack.c b/utest/test_extensions/test_dgemm_pack.c
+index a5b835798..fa9347b15 100644
+--- a/utest/test_extensions/test_dgemm_pack.c
++++ b/utest/test_extensions/test_dgemm_pack.c
+@@ -798,5 +798,43 @@ CTEST(dgemm_pack, xerbla_compute_rejects_foreign_pack)
+ }
+ #endif
+ 
++/* See test_sgemm_pack.c. */
++CTEST(dgemm_pack, status_reports_success_and_rejections)
++{
++    struct dgemm_pack_fixture f;
++    double a[4] = {0.0, 0.0, 0.0, 0.0};
++    double dest[64];
++    blasint huge = (blasint)(((blasint)1 << (sizeof(blasint) * 8 - 2)) - 1) * 2 + 1;
++
++    dgemm_pack_fixture_init(&f);
++
++    ASSERT_EQUAL(0, cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0, f.a, 4, f.packed_a));
++    ASSERT_EQUAL(0, cblas_dgemm_compute(CblasColMajor, CblasPacked, CblasPacked, 4, 4, 4, f.packed_a, 4,
++                                        f.packed_b, 4, 0.0, f.c, 4));
++    ASSERT_EQUAL(0, cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 0, 4, 4, f.a, 4, f.b, 4,
++                                        0.0, f.c, 4));
++
++    set_xerbla("DGEMM_PACK ", 9);
++    ASSERT_EQUAL(9, cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 2, 2, 2, 1.0, a, 1, dest));
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("DGEMM_PACK ", 0);
++    ASSERT_EQUAL(OPENBLAS_GEMM_STATUS_TOO_LARGE,
++                 cblas_dgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, huge, 1, huge, 1.0, a, huge, dest));
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("DGEMM_COMPUTE ", 13);
++    ASSERT_EQUAL(13, cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, a, 2, a, 2, 0.0,
++                                         dest, 1));
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("DGEMM_COMPUTE ", 9);
++    ASSERT_EQUAL(9, cblas_dgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 5, f.a, 4, f.packed_b, 4,
++                                        0.0, f.c, 4));
++    ASSERT_TRUE(check_error());
++
++    dgemm_pack_fixture_free(&f);
++}
++
+ #endif /* NO_CBLAS */
+ #endif /* BUILD_DOUBLE */
+diff --git a/utest/test_extensions/test_sbgemm_pack.c b/utest/test_extensions/test_sbgemm_pack.c
+index 4cb8b70a3..1c5f5c188 100644
+--- a/utest/test_extensions/test_sbgemm_pack.c
++++ b/utest/test_extensions/test_sbgemm_pack.c
+@@ -394,5 +394,74 @@ CTEST(sbgemm_pack, xerbla_compute_rejects_foreign_pack)
+ #endif
+ }
+ 
++/* cblas_sbgemm_status is cblas_sbgemm with a return value, and the packed
++ * entry points return one too: 0 when they did their work, the parameter
++ * number given to xerbla when an argument or a packed buffer was rejected, and
++ * a negative OPENBLAS_GEMM_STATUS_* code for a failure that has no argument to
++ * blame. Every value here is exact in bfloat16 and the sums are small, so the
++ * status variant, the plain routine and the packed compute agree exactly. */
++CTEST(sbgemm_pack, status_reports_success_and_rejections)
++{
++    bfloat16 a[16], b[16], a5[20];
++    float c_ref[16], c[16];
++    unsigned char *packed_b;
++    int i;
++
++    for (i = 0; i < 16; i++) {
++        a[i] = to_bf16(1.0f + (float)(i % 3));
++        b[i] = to_bf16(2.0f - (float)(i % 5));
++        c_ref[i] = 7.0f;
++        c[i] = 7.0f;
++    }
++    /* A 4 x 5 operand for the k = 5 case: the single precision fallback widens
++     * the operand before it reads the packed header, so it must be real. */
++    for (i = 0; i < 20; i++) a5[i] = to_bf16(1.0f);
++
++    cblas_sbgemm(CblasColMajor, CblasNoTrans, CblasTrans, 4, 4, 4, 1.0f, a, 4, b, 4, 0.5f, c_ref, 4);
++    ASSERT_EQUAL(0, cblas_sbgemm_status(CblasColMajor, CblasNoTrans, CblasTrans, 4, 4, 4, 1.0f, a, 4, b, 4, 0.5f, c, 4));
++    for (i = 0; i < 16; i++) ASSERT_DBL_NEAR_TOL(c_ref[i], c[i], SINGLE_EPS);
++
++    ASSERT_EQUAL(0, cblas_sbgemm_status(CblasColMajor, CblasNoTrans, CblasNoTrans, 0, 4, 4, 1.0f, a, 4, b, 4, 0.5f, c, 4));
++
++    set_xerbla("SBGEMM ", 2);
++    ASSERT_EQUAL(2, cblas_sbgemm_status(CblasColMajor, CblasNoTrans, INVALID, 4, 4, 4, 1.0f, a, 4, b, 4, 0.0f, c, 4));
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("SBGEMM ", 13);
++    ASSERT_EQUAL(13, cblas_sbgemm_status(CblasColMajor, CblasNoTrans, CblasNoTrans, 4, 4, 4, 1.0f, a, 4, b, 4, 0.0f, c, 1));
++    ASSERT_TRUE(check_error());
++
++    packed_b = (unsigned char *)malloc(cblas_sbgemm_pack_get_size(CblasBMatrix, 4, 4, 4));
++    ASSERT_EQUAL(0, cblas_sbgemm_pack(CblasColMajor, CblasBMatrix, CblasTrans, 4, 4, 4, 1.0f, b, 4, (bfloat16 *)packed_b));
++    for (i = 0; i < 16; i++) c[i] = 7.0f;
++    ASSERT_EQUAL(0, cblas_sbgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 4, a, 4, (bfloat16 *)packed_b, 4,
++                                         0.5f, c, 4));
++    for (i = 0; i < 16; i++) ASSERT_DBL_NEAR_TOL(c_ref[i], c[i], SINGLE_EPS);
++
++    /* A rejected argument leaves the buffer untouched, so the earlier pack
++     * still serves. */
++    set_xerbla("SBGEMM_PACK ", 9);
++    ASSERT_EQUAL(9, cblas_sbgemm_pack(CblasColMajor, CblasBMatrix, CblasNoTrans, 4, 4, 4, 1.0f, b, 1, (bfloat16 *)packed_b));
++    ASSERT_TRUE(check_error());
++    for (i = 0; i < 16; i++) c[i] = 7.0f;
++    ASSERT_EQUAL(0, cblas_sbgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 4, a, 4, (bfloat16 *)packed_b, 4,
++                                         0.5f, c, 4));
++    for (i = 0; i < 16; i++) ASSERT_DBL_NEAR_TOL(c_ref[i], c[i], SINGLE_EPS);
++
++    /* A packed operand made for another k is reported at its own position. */
++    set_xerbla("SBGEMM_COMPUTE ", 9);
++    ASSERT_EQUAL(9, cblas_sbgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 5, a5, 4, (bfloat16 *)packed_b, 4,
++                                         0.0f, c, 4));
++    ASSERT_TRUE(check_error());
++
++    /* An order that is neither row nor column major names argument 1. */
++    set_xerbla("SBGEMM ", 0);
++    ASSERT_EQUAL(1, cblas_sbgemm_status((enum CBLAS_ORDER)INVALID, CblasNoTrans, CblasNoTrans, 4, 4, 4, 1.0f, a, 4, b, 4,
++                                        0.0f, c, 4));
++    ASSERT_TRUE(check_error());
++
++    free(packed_b);
++}
++
+ #endif /* NO_CBLAS */
+ #endif /* BUILD_BFLOAT16 */
+diff --git a/utest/test_extensions/test_sgemm_pack.c b/utest/test_extensions/test_sgemm_pack.c
+index 6657b0c28..2117fcd58 100644
+--- a/utest/test_extensions/test_sgemm_pack.c
++++ b/utest/test_extensions/test_sgemm_pack.c
+@@ -798,5 +798,47 @@ CTEST(sgemm_pack, xerbla_compute_rejects_foreign_pack)
+ }
+ #endif
+ 
++/* The packed entry points return a status: 0 when they did their work, the
++ * parameter number they gave xerbla when an argument or a packed buffer was
++ * rejected, and a negative OPENBLAS_GEMM_STATUS_* code for a failure that has
++ * no argument to blame. */
++CTEST(sgemm_pack, status_reports_success_and_rejections)
++{
++    struct sgemm_pack_fixture f;
++    float a[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++    float dest[64];
++    blasint huge = (blasint)(((blasint)1 << (sizeof(blasint) * 8 - 2)) - 1) * 2 + 1;
++
++    sgemm_pack_fixture_init(&f);
++
++    ASSERT_EQUAL(0, cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 4, 4, 4, 1.0f, f.a, 4, f.packed_a));
++    ASSERT_EQUAL(0, cblas_sgemm_compute(CblasColMajor, CblasPacked, CblasPacked, 4, 4, 4, f.packed_a, 4,
++                                        f.packed_b, 4, 0.0f, f.c, 4));
++    ASSERT_EQUAL(0, cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 0, 4, 4, f.a, 4, f.b, 4,
++                                        0.0f, f.c, 4));
++
++    set_xerbla("SGEMM_PACK ", 9);
++    ASSERT_EQUAL(9, cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, 2, 2, 2, 1.0f, a, 1, dest));
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("SGEMM_PACK ", 0);
++    ASSERT_EQUAL(OPENBLAS_GEMM_STATUS_TOO_LARGE,
++                 cblas_sgemm_pack(CblasColMajor, CblasAMatrix, CblasNoTrans, huge, 1, huge, 1.0f, a, huge, dest));
++    ASSERT_TRUE(check_error());
++
++    set_xerbla("SGEMM_COMPUTE ", 13);
++    ASSERT_EQUAL(13, cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, a, 2, a, 2, 0.0f,
++                                         dest, 1));
++    ASSERT_TRUE(check_error());
++
++    /* A packed operand made for another k is reported at its own position. */
++    set_xerbla("SGEMM_COMPUTE ", 9);
++    ASSERT_EQUAL(9, cblas_sgemm_compute(CblasColMajor, CblasNoTrans, CblasPacked, 4, 4, 5, f.a, 4, f.packed_b, 4,
++                                        0.0f, f.c, 4));
++    ASSERT_TRUE(check_error());
++
++    sgemm_pack_fixture_free(&f);
++}
++
+ #endif /* NO_CBLAS */
+ #endif /* BUILD_SINGLE */

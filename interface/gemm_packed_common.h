@@ -38,6 +38,7 @@
 
 #include <stdio.h>
 #include "common.h"
+#include "common_sbfallback.h"
 
 #if defined(COMPLEX) || defined(XDOUBLE) || defined(HFLOAT16) || defined(BGEMM)
 #error "the packed GEMM interface supports SGEMM, DGEMM, and SBGEMM only"
@@ -86,45 +87,33 @@ static inline int gemm_packed_trans_code(blasint trans) {
   }
 }
 
-/* AMX tile data must be enabled per process on Linux before the Sapphire
- * Rapids SBGEMM copy and compute kernels may touch tile registers. This is the
- * same request interface/gemm.c makes. Returns 0 when the kernels may run. */
-#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
-#include <unistd.h>
-#include <sys/syscall.h>
-#ifndef XFEATURE_XTILEDATA
-#define XFEATURE_XTILEDATA 18
+/* Under DYNAMIC_ARCH the blocking parameters live in the gotoblas table,
+ * which a constructor fills before main() with GCC and clang. MSVC has no
+ * constructor, and there the table is filled by the first blas_memory_alloc();
+ * cblas_?gemm_pack_get_size never allocates, so it fills the table itself if
+ * it is the first call into the library. */
+static inline void gemm_packed_ensure_initialized(void) {
+#ifdef DYNAMIC_ARCH
+  if (gotoblas == NULL) gotoblas_dynamic_init();
 #endif
-#ifndef ARCH_REQ_XCOMP_PERM
-#define ARCH_REQ_XCOMP_PERM 0x1023
-#endif
-/* The permission is granted per process (Documentation/arch/x86/xstate.rst),
- * so a successful request is remembered. The flag is only ever set to 1 and
- * read with relaxed atomics, so concurrent first calls at worst repeat the
- * request, which the kernel answers with success. */
-static int gemm_packed_amxtile_permission = 0;
-
-static inline int gemm_packed_request_amxtile(void) {
-  long status;
-  if (__atomic_load_n(&gemm_packed_amxtile_permission, __ATOMIC_RELAXED)) return 0;
-  status = syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA);
-  if (status != 0) {
-    fprintf(stderr, "XTILEDATA permission not granted in your device(Linux, "
-                    "Intel Sapphier Rapids), skip sbgemm calculation\n");
-    return -1;
-  }
-  __atomic_store_n(&gemm_packed_amxtile_permission, 1, __ATOMIC_RELAXED);
-  return 0;
 }
-#endif
 
+/* Returns 0 when the entry point may go on: the bfloat16 kernels of the core
+ * in use can run (sbgemm_kernels_unavailable() first replaces them with
+ * Cooperlake's when that is what it takes), or the single precision fallback
+ * of common_sbfallback.h stands in for them. Non-zero only when neither
+ * holds; the caller then returns OPENBLAS_GEMM_STATUS_NO_KERNEL. Always 0 for
+ * SGEMM and DGEMM. Every bfloat16 entry point, cblas_sbgemm_pack_get_size
+ * included, calls this before it reads an SBGEMM blocking parameter. */
 static inline int gemm_packed_kernels_ready(void) {
-#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
-#if defined(DYNAMIC_ARCH)
-  if (gotoblas->need_amxtile_permission && gemm_packed_request_amxtile() == -1) return -1;
-#elif defined(SAPPHIRERAPIDS)
-  if (gemm_packed_request_amxtile() == -1) return -1;
+#if defined(BFLOAT16) && defined(ARCH_X86_64)
+  if (sbgemm_kernels_unavailable()) {
+#if defined(SBGEMM_FLOAT_FALLBACK)
+    return 0;
+#else
+    return -1;
 #endif
+  }
 #endif
   return 0;
 }

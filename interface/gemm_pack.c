@@ -36,13 +36,21 @@
  * defined and CNAME set to cblas_sgemm_pack, cblas_dgemm_pack, or
  * cblas_sbgemm_pack; the _get_size entry point derives its name from CNAME.
  *
- *   size = cblas_?gemm_pack_get_size(identifier, m, n, k)
- *   cblas_?gemm_pack(order, identifier, trans, m, n, k, alpha, src, ld, dest)
+ *   size   = cblas_?gemm_pack_get_size(identifier, m, n, k)
+ *   status = cblas_?gemm_pack(order, identifier, trans, m, n, k, alpha, src, ld, dest)
  *
  * The packed buffer records alpha; the product computed later by
  * cblas_?gemm_compute is alpha * op(A) * op(B) + beta * C, with alpha taken
  * from the packed operand(s). When both operands are packed the two recorded
  * alphas are multiplied.
+ *
+ * cblas_?gemm_pack returns 0 when dest was packed. Otherwise the value says
+ * why not: the number of the rejected argument, or one of the negative
+ * OPENBLAS_GEMM_STATUS_* codes of cblas.h. A rejected argument and
+ * OPENBLAS_GEMM_STATUS_TOO_LARGE leave dest untouched; the other failures
+ * happen after writing began and leave no valid header behind, so that a
+ * later cblas_?gemm_compute rejects the buffer. MKL declares the routine void;
+ * callers written for MKL may keep ignoring the result.
  */
 
 #include <stdio.h>
@@ -73,6 +81,12 @@ size_t GEMM_PACK_GET_SIZE_NAME(enum CBLAS_IDENTIFIER identifier, blasint m, blas
     return 0;
   }
 
+  gemm_packed_ensure_initialized();
+  /* The size follows the blocking of the kernels that will pack, so the
+   * bfloat16 kernel question is settled first. A size is still returned when
+   * the kernels cannot run; cblas_?gemm_pack reports that. */
+  (void)gemm_packed_kernels_ready();
+
   extent = (identifier == CblasAMatrix) ? (BLASLONG)m : (BLASLONG)n;
   bytes = GEMM_PACKED_SIZE(extent, (BLASLONG)k);
   if (bytes == 0) {
@@ -84,8 +98,8 @@ size_t GEMM_PACK_GET_SIZE_NAME(enum CBLAS_IDENTIFIER identifier, blasint m, blas
   return bytes;
 }
 
-void CNAME(enum CBLAS_ORDER order, enum CBLAS_IDENTIFIER identifier, enum CBLAS_TRANSPOSE trans,
-           blasint m, blasint n, blasint k, FLOAT alpha, IFLOAT *src, blasint ld, IFLOAT *dest) {
+int CNAME(enum CBLAS_ORDER order, enum CBLAS_IDENTIFIER identifier, enum CBLAS_TRANSPOSE trans,
+          blasint m, blasint n, blasint k, FLOAT alpha, IFLOAT *src, blasint ld, IFLOAT *dest) {
   blasint info = 0;
   int internal_identifier = -1;
   int internal_trans, status;
@@ -128,26 +142,41 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_IDENTIFIER identifier, enum CBLAS_
 
   if (info) {
     BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
-    return;
+    return (int)info;
   }
 
+  gemm_packed_ensure_initialized();
+
   if (gemm_packed_kernels_ready() != 0) {
-    /* The bfloat16 kernels cannot run in this process (see interface/gemm.c,
-     * which skips the computation the same way). Leave no valid header behind,
-     * so that a later cblas_?gemm_compute rejects the buffer instead of
-     * reading stale panels. */
+    /* The bfloat16 kernels cannot run in this process and nothing stands in
+     * for them (see interface/gemm.c, which gives up the same way). Leave no
+     * valid header behind, so that a later cblas_?gemm_compute rejects the
+     * buffer instead of reading stale panels. */
     memset(dest, 0, GEMM_PACKED_HEADER_BYTES);
-    return;
+    return OPENBLAS_GEMM_STATUS_NO_KERNEL;
   }
 
   status = GEMM_PACKED_PACK(internal_identifier, internal_trans, internal_m, internal_n, (BLASLONG)k,
                             alpha, src, (BLASLONG)ld, (void *)dest);
-  if (status != 0) {
-    /* 2: the packed size does not fit, so cblas_?gemm_pack_get_size had
-     * returned 0 for these dimensions; 3: internal layout inconsistency;
-     * 4: the float expansion of the single precision SBGEMM fallback could
-     * not be allocated. */
-    info = 0;
-    BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
+  switch (status) {
+    case 0:
+      return 0;
+    case 4:
+      /* The float expansion of the single precision SBGEMM fallback could not
+       * be allocated. The driver has said so and zeroed the header; this is
+       * not an argument error, so xerbla is not involved. */
+      return OPENBLAS_GEMM_STATUS_NO_MEMORY;
+    case 2:
+      /* The packed size does not fit, so cblas_?gemm_pack_get_size had
+       * returned 0 for these dimensions. */
+      info = 0;
+      BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
+      return OPENBLAS_GEMM_STATUS_TOO_LARGE;
+    default:
+      /* 3: the panels written disagree with the size computed in closed form;
+       * 1 cannot happen after the checks above. Both are internal errors. */
+      info = 0;
+      BLASFUNC(xerbla)(ERROR_NAME_PACK, &info, sizeof(ERROR_NAME_PACK));
+      return OPENBLAS_GEMM_STATUS_INTERNAL;
   }
 }

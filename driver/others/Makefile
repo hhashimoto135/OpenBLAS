@@ -44,6 +44,10 @@ else
 COMMONOBJS	+=  parameter.$(SUFFIX)
 endif
 
+ifeq ($(BUILD_BFLOAT16), 1)
+COMMONOBJS	+= sbgemm_amx.$(SUFFIX)
+endif
+
 ifeq ($(EXPRECISION), 1)
 COMMONOBJS	+= x_abs.$(SUFFIX) qlamch.$(SUFFIX) qlamc3.$(SUFFIX)
 endif
@@ -134,6 +138,9 @@ dynamic%$(PSUFFIX) : dynamic%c
 	$(CC) $(PFLAGS) -c $< -o $(@F)
 
 parameter.$(SUFFIX) : parameter.c ../../param.h
+	$(CC) $(CFLAGS) -c $< -o $(@F)
+
+sbgemm_amx.$(SUFFIX) : sbgemm_amx.c
 	$(CC) $(CFLAGS) -c $< -o $(@F)
 
 init.$(SUFFIX) : init.c

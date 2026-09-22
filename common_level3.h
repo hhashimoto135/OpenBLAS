@@ -2098,6 +2098,12 @@ int dgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLON
 int sbgemm_packed_pack(int identifier, int trans, BLASLONG m, BLASLONG n, BLASLONG k,
                        float alpha, bfloat16 *src, BLASLONG ld, void *dest);
 
+/* Bits of the value ?gemm_packed_compute returns. 0 is success; each bit
+ * names a reason for having left C untouched. */
+#define GEMM_PACKED_COMPUTE_BAD_A      1 /* the packed A buffer is not usable */
+#define GEMM_PACKED_COMPUTE_BAD_B      2 /* the packed B buffer is not usable */
+#define GEMM_PACKED_COMPUTE_NO_MEMORY  4 /* the float expansion of the SBGEMM fallback could not be allocated */
+
 /* `type_tag` is the GEMM_PACKED_TAG_* a packed operand must carry to be
  * accepted; it is the tag of the entry point the caller used, not of this
  * driver. */

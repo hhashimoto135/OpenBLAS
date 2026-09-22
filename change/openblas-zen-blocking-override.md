@@ -120,12 +120,13 @@ if (strcmp(gotoblas_corename(), "cooperlake") == 0 || ... ) {
 大文字小文字を区別する(小文字なのは arm64 の `dynamic_arm64.c` の方)。結果として
 クラッシュは直るが、Zen 4 / Zen 5 のチューニングが全コアで失われる。
 
-実行時にコア名で判定すること自体にも難がある。`force_coretype()` のループは
-`for (i = 1; i <= 25; i++)`(`dynamic.c:1085`)で、`corename[]` は 27 要素、
-`"SapphireRapids"` は添字 26 にある。つまり `OPENBLAS_CORETYPE=SapphireRapids` は
-認識されずホスト既定に落ちるので、実行時判定は `"SapphireRapids"` を報告し得ない。
+(初版の本節は、`force_coretype()` のループ上限 `i <= 25` のために
+`OPENBLAS_CORETYPE=SapphireRapids` が認識されないことを「実行時判定は
+`"SapphireRapids"` を報告し得ない」と書いていたが、それは強制指定の話で、自動判別で
+選ばれた場合 `gotoblas_corename()` は `"SapphireRapids"` を返す。ループ上限は 4 つ目の
+コミット(`openblas-amx-fallback-status.md`)で直した。)
 
-コンパイル時の whitelist はこれらを持たない。
+コンパイル時の whitelist は大文字小文字の問題を持たない。
 
 なお `setparam-ref.c` は `DYNAMIC_ARCH` のときしかコンパイルされない
 (`kernel/CMakeLists.txt` の `if (${DYNAMIC_ARCH})`、`kernel/Makefile` の

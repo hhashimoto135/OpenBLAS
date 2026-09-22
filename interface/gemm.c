@@ -168,21 +168,17 @@ static size_t zgemm_small_kernel_b0[] = {
 #endif
 #endif
 
-#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
-#define XFEATURE_XTILEDATA 18
-#define ARCH_REQ_XCOMP_PERM 0x1023
-static int openblas_amxtile_permission = 0;
-static int init_amxtile_permission() {
-  long status =
-      syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA);
-  if (status != 0) {
-    fprintf(stderr, "XTILEDATA permission not granted in your device(Linux, "
-                    "Intel Sapphier Rapids), skip sbgemm calculation\n");
-    return -1;
-  }
-  openblas_amxtile_permission = 1;
-  return 0;
-}
+/* cblas_sbgemm_status is cblas_sbgemm with a return value (cblas.h,
+ * OPENBLAS_GEMM_STATUS_*). The two share the body below, so every exit from
+ * it goes through GEMM_RETURN; for the other entry points, which return
+ * nothing, the macro drops its argument. */
+#if defined(CBLAS) && defined(BFLOAT16) && !defined(BGEMM)
+#define GEMM_STATUS_CONCAT_(a, b) a##b
+#define GEMM_STATUS_CONCAT(a, b) GEMM_STATUS_CONCAT_(a, b)
+#define GEMM_STATUS_NAME GEMM_STATUS_CONCAT(CNAME, _status)
+#define GEMM_RETURN(status) return (status)
+#else
+#define GEMM_RETURN(status) return
 #endif
 
 #ifdef DYNAMIC_ARCH
@@ -369,6 +365,36 @@ void NAME(char *TRANSA, char *TRANSB,
 
 #else
 
+#ifdef GEMM_STATUS_NAME
+
+int GEMM_STATUS_NAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANSPOSE TransB,
+	   blasint m, blasint n, blasint k,
+	   FLOAT alpha,
+	   IFLOAT *a, blasint lda,
+	   IFLOAT *b, blasint ldb,
+	   FLOAT beta,
+	   FLOAT *c, blasint ldc);
+
+void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANSPOSE TransB,
+	   blasint m, blasint n, blasint k,
+	   FLOAT alpha,
+	   IFLOAT *a, blasint lda,
+	   IFLOAT *b, blasint ldb,
+	   FLOAT beta,
+	   FLOAT *c, blasint ldc) {
+  (void)GEMM_STATUS_NAME(order, TransA, TransB, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
+int GEMM_STATUS_NAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANSPOSE TransB,
+	   blasint m, blasint n, blasint k,
+	   FLOAT alpha,
+	   IFLOAT *a, blasint lda,
+	   IFLOAT *b, blasint ldb,
+	   FLOAT beta,
+	   FLOAT *c, blasint ldc) {
+
+#else /* GEMM_STATUS_NAME */
+
 void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANSPOSE TransB,
 	   blasint m, blasint n, blasint k,
 #ifndef COMPLEX
@@ -389,6 +415,8 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANS
   FLOAT *b = (FLOAT*) vb;
   FLOAT *c = (FLOAT*) vc;
 #endif
+
+#endif /* GEMM_STATUS_NAME */
 
   blas_arg_t args;
   int transa, transb;
@@ -539,11 +567,13 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANS
 
   if (info >= 0) {
     BLASFUNC(xerbla)(ERROR_NAME, &info, sizeof(ERROR_NAME));
-    return;
+    /* An order that is neither row nor column major leaves info at 0, which
+     * xerbla reports as parameter 0; the status names the order argument. */
+    GEMM_RETURN(info == 0 ? 1 : info);
   }
 
 
-  if ((args.m == 0) || (args.n == 0)) return;
+  if ((args.m == 0) || (args.n == 0)) GEMM_RETURN(0);
 #if !defined(COMPLEX) && !defined(DOUBLE) && !defined(BFLOAT16)  && !defined(HFLOAT16)
 #if defined(ARCH_x86) && (defined(USE_SGEMM_KERNEL_DIRECT)||defined(DYNAMIC_ARCH))
 #if defined(DYNAMIC_ARCH)
@@ -551,7 +581,7 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_TRANSPOSE TransA, enum CBLAS_TRANS
 #endif
   if (order == CblasRowMajor && beta == 0 && alpha == 1.0 && TransA == CblasNoTrans && TransB == CblasNoTrans && SGEMM_DIRECT_PERFORMANT(m,n,k)) {
         SGEMM_DIRECT(m, n, k, a, lda, b, ldb, c, ldc);
-        return;
+        GEMM_RETURN(0);
   }
 #endif
 #if defined(ARCH_ARM64) && (defined(USE_SGEMM_KERNEL_DIRECT)||defined(DYNAMIC_ARCH))
@@ -565,12 +595,12 @@ if (strcmp(gotoblas_corename(), "armv9sme") == 0
 #endif
   if (order == CblasRowMajor && k==lda && n==ldb && n==ldc && beta == 0 && alpha == 1.0 && TransA == CblasNoTrans && TransB == CblasNoTrans && SGEMM_DIRECT_PERFORMANT(m,n,k)) {
         SGEMM_DIRECT(m, n, k, a, lda, b, ldb, c, ldc);
-        return;
+        GEMM_RETURN(0);
   }
 else
  if (order == CblasRowMajor && k==lda && n==ldb && n==ldc && TransA == CblasNoTrans && TransB == CblasNoTrans && SGEMM_DIRECT_PERFORMANT(m,n,k)) {
         SGEMM_DIRECT_ALPHA_BETA(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-        return;
+        GEMM_RETURN(0);
   }
 
 #endif
@@ -578,21 +608,23 @@ else
 
 #endif
 
-#if defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
-#if defined(DYNAMIC_ARCH)
-  if (gotoblas->need_amxtile_permission &&
-      openblas_amxtile_permission == 0 && init_amxtile_permission() == -1) {
-    return;
-  }
+#if defined(BFLOAT16) && !defined(BGEMM) && defined(ARCH_X86_64)
+  /* The Sapphire Rapids SBGEMM kernels need AMX, which the OS or, on Linux,
+   * the kernel's per-process permission may withhold. (BGEMM has no AMX
+   * kernel and is left alone.) sbgemm_kernels_unavailable()
+   * (driver/others/sbgemm_amx.c) replaces the kernels with Cooperlake's when
+   * the build has that table; when it has not, the single precision fallback
+   * below takes over where it is compiled in, and otherwise the call does
+   * nothing, as upstream did. Either way it runs before any SBGEMM parameter
+   * of the table is read. */
+#if defined(SBGEMM_FLOAT_FALLBACK)
+  (void)sbgemm_kernels_unavailable();
+#else
+  if (sbgemm_kernels_unavailable()) GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_KERNEL);
 #endif
-#if !defined(DYNAMIC_ARCH) && defined(SAPPHIRERAPIDS)
-  if (openblas_amxtile_permission == 0 && init_amxtile_permission() == -1) {
-    return;
-  }
 #endif
-#endif  // defined(__linux__) && defined(__x86_64__) && defined(BFLOAT16)
 
-  if ((args.m == 0) || (args.n == 0)) return;
+  if ((args.m == 0) || (args.n == 0)) GEMM_RETURN(0);
 
 #if 0
   fprintf(stderr, "m = %4d  n = %d  k = %d  lda = %4d  ldb = %4d  ldc = %4d\n",
@@ -622,15 +654,13 @@ else
     if (a_float == NULL || b_float == NULL) {
       free(a_float);
       free(b_float);
-      /* C is left untouched, as it is when the Sapphire Rapids kernels cannot
-       * obtain AMX tile permission above. */
-      openblas_warning(0, SBGEMM_FALLBACK_SKIPPED);
-      return;
+      /* C is left untouched. cblas_sbgemm_status reports it; cblas_sbgemm and
+       * sbgemm_ have only the message. */
+      openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
+      GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
     }
 
     {
-      char sgemm_transa = transa ? 'T' : 'N';
-      char sgemm_transb = transb ? 'T' : 'N';
       blasint sgemm_m   = (blasint)args.m;
       blasint sgemm_n   = (blasint)args.n;
       blasint sgemm_k   = product_is_empty ? 0 : (blasint)args.k;
@@ -638,14 +668,27 @@ else
       blasint sgemm_ldb = (blasint)sbgemm_expanded_ld(b_rows);
       blasint sgemm_ldc = (blasint)args.ldc;
 
+      /* args is in the internal column-major orientation, so the product goes
+       * to the column-major SGEMM of the same interface as this entry point:
+       * a NO_FBLAS (ONLY_CBLAS) build has no sgemm_, and a NO_CBLAS build has
+       * no cblas_sgemm, but each has the one its sbgemm was compiled for. */
+#ifdef CBLAS
+      cblas_sgemm(CblasColMajor, transa ? CblasTrans : CblasNoTrans, transb ? CblasTrans : CblasNoTrans,
+                  sgemm_m, sgemm_n, sgemm_k, sgemm_alpha, a_float, sgemm_lda, b_float, sgemm_ldb,
+                  sgemm_beta, (float *)args.c, sgemm_ldc);
+#else
+      char sgemm_transa = transa ? 'T' : 'N';
+      char sgemm_transb = transb ? 'T' : 'N';
+
       BLASFUNC(sgemm)(&sgemm_transa, &sgemm_transb, &sgemm_m, &sgemm_n, &sgemm_k,
                       &sgemm_alpha, a_float, &sgemm_lda, b_float, &sgemm_ldb,
                       &sgemm_beta, (float *)args.c, &sgemm_ldc);
+#endif
     }
 
     free(a_float);
     free(b_float);
-    return;
+    GEMM_RETURN(0);
   }
 #endif
 
@@ -692,7 +735,7 @@ else
       bool is_efficient_gemv = have_tuned_gemv || ((NT == 'N') || (NT == 'T' && inc_x == 1));
       if (is_efficient_gemv) {
         GEMV(&NT, &m, &n, args.alpha, args.a, &lda, args.b, &inc_x, args.beta, args.c, &inc_y);
-        return;
+        GEMM_RETURN(0);
       }
     }
     if (args.m == 1) {
@@ -715,7 +758,7 @@ else
       bool is_efficient_gemv = have_tuned_gemv || ((NT == 'N' && inc_y == 1) || (NT == 'T' && inc_x == 1));
       if (is_efficient_gemv) {
         GEMV(&NT, &m, &n, args.alpha, args.b, &ldb, args.a, &inc_x, args.beta, args.c, &inc_y);
-        return;
+        GEMM_RETURN(0);
       }
     }
   }
@@ -733,7 +776,7 @@ else
 	  }else{
 		(GEMM_SMALL_KERNEL((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, *(FLOAT *)(args.beta), args.c, args.ldc);
 	  }
-	  return;
+	  GEMM_RETURN(0);
   }
 #else
   if(GEMM_SMALL_MATRIX_PERMIT(transa, transb, args.m, args.n, args.k, alpha[0], alpha[1], beta[0], beta[1])){
@@ -742,7 +785,7 @@ else
 	  }else{
 		(ZGEMM_SMALL_KERNEL((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, alpha[0], alpha[1], args.b, args.ldb, beta[0], beta[1], args.c, args.ldc);
 	  }
-	  return;
+	  GEMM_RETURN(0);
   }
 #endif
 #endif
@@ -818,5 +861,5 @@ else
 
   IDEBUG_END;
 
-  return;
+  GEMM_RETURN(0);
 }

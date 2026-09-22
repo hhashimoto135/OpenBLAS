@@ -391,8 +391,13 @@ inner オペランド(`GEMM_P` でブロック)、左オペランド(`kLeft`)が
   1 つの packed 重み行列を任意のバッチサイズに使える。
 - alpha の有限性や記録された 2 つの alpha の積のオーバーフローなど、C 層で検査しない
   条件は利用側の assert で扱う。
-- AMX 権限が得られない環境では pack が黙って何もしないため(§5.7)、利用側は成功を
-  検出できない。この挙動は利用側のドキュメントに明記する。
+- ~~AMX 権限が得られない環境では pack が黙って何もしないため(§5.7)、利用側は成功を
+  検出できない。この挙動は利用側のドキュメントに明記する。~~
+  → 4 つ目のコミット(`openblas-amx-fallback-status.md`)で解消。AMX が使えなければ
+  Cooperlake テーブルへ切り替えて計算し、`cblas_?gemm_pack` / `cblas_?gemm_compute`
+  は `int` のステータスを返す(§3.2 の xerbla 報告はそのまま、戻り値が加わった)。
+  `gemm_packed_common.h` の AMX 権限取得コードは `driver/others/sbgemm_amx.c` に
+  移った。
 
 ## 11. 今後の拡張候補
 
