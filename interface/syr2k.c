@@ -390,7 +390,9 @@ if (strcmp(gotoblas_corename(), "armv9sme") == 0
 
   FUNCTION_PROFILE_START();
 
-  buffer = (FLOAT *)blas_memory_alloc(0);
+  buffer = (FLOAT *)blas_memory_alloc_try(0);
+  /* No work buffer: the thread's failure flag is set. */
+  if (buffer == NULL) return;
 
   sa = (FLOAT *)((BLASLONG)buffer + GEMM_OFFSET_A);
   sb = (FLOAT *)(((BLASLONG)sa + ((GEMM_P * GEMM_Q * COMPSIZE * SIZE + GEMM_ALIGN) & ~GEMM_ALIGN)) + GEMM_OFFSET_B);

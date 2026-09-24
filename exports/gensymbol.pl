@@ -180,6 +180,8 @@
     goto_set_num_threads,
     openblas_get_config,
     openblas_get_corename,
+    openblas_alloc_failed,
+    openblas_clear_alloc_failed,
     openblas_set_threads_callback_function,
     openblas_set_xerbla,
 );

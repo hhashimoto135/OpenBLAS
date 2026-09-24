@@ -176,7 +176,9 @@ void CNAME(enum CBLAS_ORDER order,
   if (incy < 0) y -= (n - 1) * incy;
   if (incx < 0) x -= (m - 1) * incx;
 
-  STACK_ALLOC(m, FLOAT, buffer);
+  STACK_ALLOC_TRY(m, FLOAT, buffer);
+  /* No work buffer: the thread's failure flag is set. */
+  if (buffer == NULL) return;
 
 #ifdef SMPTEST
   // Threshold chosen so that speed-up is > 1 on a Xeon E5-2630

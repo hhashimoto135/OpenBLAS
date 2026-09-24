@@ -84,6 +84,42 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 #endif
 
+/* Set when an allocation on behalf of a call in this thread failed and the
+ * call returned without doing its work: no work buffer was free or one could
+ * not be mapped (blas_memory_alloc_try below), or a temporary of the bfloat16
+ * paths could not be allocated (blas_memory_note_failure). Routines that
+ * cannot report through a return value, and LAPACK routines whose BLAS calls
+ * fail, leave this behind for the application, which reads it with
+ * openblas_alloc_failed() and clears it with openblas_clear_alloc_failed().
+ * One flag per thread, so that threads calling concurrently do not see each
+ * other's failures; a compiler without thread-local storage gets one flag per
+ * process. */
+#ifndef thread_local
+# if __STDC_VERSION__ >= 201112 && !defined __STDC_NO_THREADS__
+#  define thread_local _Thread_local
+# elif defined _WIN32 && (defined _MSC_VER || defined __ICL || defined __DMC__ || defined __BORLANDC__)
+#  define thread_local __declspec(thread)
+# elif (defined __GNUC__ || defined __SUNPRO_C || defined __xlC__) && !defined(__APPLE__)
+#  define thread_local __thread
+# else
+#  define thread_local
+# endif
+#endif
+
+static thread_local int blas_alloc_failed = 0;
+
+void blas_memory_note_failure(void) {
+  blas_alloc_failed = 1;
+}
+
+int openblas_alloc_failed(void) {
+  return blas_alloc_failed;
+}
+
+void openblas_clear_alloc_failed(void) {
+  blas_alloc_failed = 0;
+}
+
 #if defined(USE_TLS) && defined(SMP)
 #define COMPILE_TLS
 
@@ -1327,6 +1363,16 @@ UNLOCK_COMMAND(&alloc_lock);
   printf("cpu cores than what OpenBLAS was configured to handle.\n");
 
   return NULL;
+}
+
+/* The thread-local allocator returns NULL, after its own notice, when the
+ * thread's table is full; the try variant adds the failure flag so that the
+ * callers that return on NULL are not silent. A mapping failure still retries
+ * as upstream does. */
+void *blas_memory_alloc_try(int procpos){
+  void *buffer = blas_memory_alloc(procpos);
+  if (buffer == NULL) blas_memory_note_failure();
+  return buffer;
 }
 
 void blas_memory_free(void *buffer){
@@ -2758,9 +2804,17 @@ static int memory_overflowed = 0;
 /*                1 : Level 2 functions      */
 /*                2 : Thread                 */
 
-void *blas_memory_alloc(int procpos){
+/* blas_memory_alloc() behaves as upstream does: it ends the process when a
+ * region cannot be mapped after ten retries (in the auxiliary array too, where
+ * upstream retried for ever) and returns NULL after a notice when every region
+ * is in use. blas_memory_alloc_try() returns NULL in both cases, with the slot
+ * released again and the calling thread's failure flag set, for the routines
+ * that report to the application rather than compute with a buffer they do
+ * not have. Both are wrappers of this function. */
+static void *blas_memory_alloc_impl(int procpos, int try_only){
 
   int i;
+  int failcount2 = 0;
 
   int position;
 #if defined(WHEREAMI) && !defined(USE_OPENMP)
@@ -2982,6 +3036,7 @@ void *blas_memory_alloc(int procpos){
 	      base_address = 0UL;
 	      failcount++;
 	      if (failcount >10) {
+		      if (try_only) goto mapping_failed;
 		      fprintf(stderr, "OpenBLAS error: Memory allocation still failed after 10 retries, giving up.\n");
 		      exit(1);
 	      }
@@ -3054,6 +3109,17 @@ void *blas_memory_alloc(int procpos){
   MB;
   new_release_info = (struct release_t*) malloc(NEW_BUFFERS * sizeof(struct release_t));
   newmemory = (struct newmemstruct*) malloc(NEW_BUFFERS * sizeof(struct newmemstruct));
+  if (new_release_info == NULL || newmemory == NULL) {
+    /* The auxiliary array itself could not be allocated. In the locking builds
+     * alloc_lock is still held, so nobody has seen memory_overflowed yet; the
+     * USE_OPENMP builds take no lock here, as upstream. */
+    free((void *)new_release_info);
+    free((void *)newmemory);
+    new_release_info = NULL;
+    newmemory = NULL;
+    memory_overflowed = 0;
+    goto terminate;
+  }
   for (i = 0; i < NEW_BUFFERS; i++) {
   newmemory[i].addr   = (void *)0;
 #if defined(WHEREAMI) && !defined(USE_OPENMP)
@@ -3070,6 +3136,10 @@ allocation2:
 #else
   blas_unlock((BLASULONG *)&newmemory[position-NUM_BUFFERS].lock);
 #endif
+  /* Upstream mapped a new region every time an auxiliary slot was taken,
+   * leaking the previous one and eventually overrunning new_release_info.
+   * A slot that already has its region keeps it, as in the first array. */
+  if (!newmemory[position-NUM_BUFFERS].addr) {
     do {
 #ifdef DEBUG
       printf("Allocation Start : %lx\n", base_address);
@@ -3120,7 +3190,18 @@ allocation2:
 #ifdef DEBUG
       printf("  Success -> %08lx\n", map_address);
 #endif
-      if (((BLASLONG) map_address) == -1) base_address = 0UL;
+      if (((BLASLONG) map_address) == -1) {
+	      base_address = 0UL;
+	      /* Upstream retried for ever here; give up as the first array does. */
+	      failcount2++;
+	      if (failcount2 >10) {
+		      if (try_only) goto mapping_failed2;
+		      fprintf(stderr, "OpenBLAS error: Memory allocation still failed after 10 retries, giving up.\n");
+		      exit(1);
+	      }
+      } else {
+	      failcount2 = 0;
+      }
 
       if (base_address) base_address += BUFFER_SIZE + FIXED_PAGESIZE;
 
@@ -3137,6 +3218,7 @@ allocation2:
 #ifdef DEBUG
     printf("  Mapping Succeeded. %p(%d)\n", (void *)newmemory[position-NUM_BUFFERS].addr, position);
 #endif
+  }
 
 #if defined(WHEREAMI) && !defined(USE_OPENMP)
 
@@ -3145,10 +3227,45 @@ allocation2:
 #endif
   return (void *)newmemory[position-NUM_BUFFERS].addr;
 
+  /* try_only, after the OS refused the mapping: give the slot back the way
+   * blas_memory_free does and tell the caller. */
+ mapping_failed:
+#if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
+  LOCK_COMMAND(&alloc_lock);
+#endif
+  WMB;
+  memory[position].used = 0;
+#if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
+  UNLOCK_COMMAND(&alloc_lock);
+#endif
+  blas_memory_note_failure();
+  openblas_warning(0, "OpenBLAS : cannot map a work buffer, the call is skipped\n");
+  return NULL;
+
+ mapping_failed2:
+#if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
+  LOCK_COMMAND(&alloc_lock);
+#endif
+  WMB;
+  newmemory[position-NUM_BUFFERS].used = 0;
+#if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
+  UNLOCK_COMMAND(&alloc_lock);
+#endif
+  blas_memory_note_failure();
+  openblas_warning(0, "OpenBLAS : cannot map a work buffer, the call is skipped\n");
+  return NULL;
+
 terminate:
 #if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
     UNLOCK_COMMAND(&alloc_lock);
 #endif
+  if (try_only) {
+    /* Every buffer is in use: more calls are inside OpenBLAS at once than
+     * this build has buffers for (NUM_BUFFERS, from NUM_THREADS). */
+    blas_memory_note_failure();
+    openblas_warning(0, "OpenBLAS : no work buffer is free, the call is skipped\n");
+    return NULL;
+  }
   printf("OpenBLAS : Program is Terminated. Because you tried to allocate too many memory regions.\n");
   printf("This library was built to support a maximum of %d threads - either rebuild OpenBLAS\n", NUM_BUFFERS);
 #ifdef USE_OPENMP
@@ -3160,6 +3277,14 @@ terminate:
   printf("OpenBLAS calls BLAS functions from many threads in parallel, or when your computer has more\n");
   printf("cpu cores than what OpenBLAS was configured to handle.\n");
   return NULL;
+}
+
+void *blas_memory_alloc(int procpos){
+  return blas_memory_alloc_impl(procpos, 0);
+}
+
+void *blas_memory_alloc_try(int procpos){
+  return blas_memory_alloc_impl(procpos, 1);
 }
 
 void blas_memory_free(void *free_area){

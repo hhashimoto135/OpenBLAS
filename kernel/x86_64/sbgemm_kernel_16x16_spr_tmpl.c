@@ -29,6 +29,8 @@
 #include <string.h>
 #include "common.h"
 
+extern void openblas_warning(int verbose, const char *msg);
+
 #ifndef SBGEMM_KERNEL_SPR
 #define SBGEMM_KERNEL_SPR
 typedef struct {
@@ -177,6 +179,13 @@ int sbgemm_kernel_spr_alpha(BLASLONG m, BLASLONG n, BLASLONG k, FLOAT alpha, IFL
 		raw_tmp_c = (FLOAT *)calloc(1, sizeof(FLOAT) * m * cn + 64);
 	} else {
 		raw_tmp_c = (FLOAT *)malloc(sizeof(FLOAT) * m * cn + 64);
+	}
+	/* C already holds beta * C from the driver, so the product is left
+	 * incomplete; the thread's failure flag says so. */
+	if (raw_tmp_c == NULL) {
+		openblas_warning(0, "sbgemm: cannot allocate the temporary of the AMX kernel, the result is incomplete\n");
+		blas_memory_note_failure();
+		return 1;
 	}
 	// align buf to 64 byte boundary
 	FLOAT *tmp_c = (FLOAT *)(((uintptr_t) raw_tmp_c + 63) & ~(uintptr_t)63);

@@ -283,7 +283,9 @@ void CNAME(enum CBLAS_ORDER order,
 #endif
   // for alignment
   buffer_size = (buffer_size + 3) & ~3;
-  STACK_ALLOC(buffer_size, FLOAT, buffer);
+  STACK_ALLOC_TRY(buffer_size, FLOAT, buffer);
+  /* No work buffer: the thread's failure flag is set. */
+  if (buffer == NULL) return;
 
 #ifdef SMP
   nthreads = get_gemv_optimal_nthreads(1L * m * n);

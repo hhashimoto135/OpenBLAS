@@ -46,12 +46,15 @@
  * where alpha is the product of the alphas recorded in the packed operand(s),
  * or 1 when neither operand is packed.
  *
- * The scratch buffer for the operand that is not packed comes from
- * blas_memory_alloc, exactly as for a regular GEMM, so concurrent calls from
- * several threads are safe and may share one read-only packed buffer.
+ * The scratch buffer for the operand that is not packed comes from the same
+ * pool as a regular GEMM's, so concurrent calls from several threads are safe
+ * and may share one read-only packed buffer. When no buffer can be had, the
+ * call returns OPENBLAS_GEMM_STATUS_NO_MEMORY before touching C; the packed
+ * operands are checked only after the buffer is taken, so a stale packed
+ * buffer is then reported as NO_MEMORY rather than by its position.
  *
- * Returns 0 when C was updated. Otherwise C is untouched and the value says
- * why: the number of the rejected argument (a packed buffer that does not fit
+ * Returns 0 when the routine did its work. Otherwise the value says why: the
+ * number of the rejected argument (a packed buffer that does not fit
  * the product is reported at its argument position, 7 or 9), or one of the
  * negative OPENBLAS_GEMM_STATUS_* codes of cblas.h. MKL declares the routine
  * void; callers written for MKL may keep ignoring the result.
@@ -160,7 +163,8 @@ int CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, bla
 
   if (gemm_packed_kernels_ready() != 0) return OPENBLAS_GEMM_STATUS_NO_KERNEL;
 
-  buffer = (XFLOAT *)blas_memory_alloc(0);
+  buffer = (XFLOAT *)blas_memory_alloc_try(0);
+  if (buffer == NULL) return OPENBLAS_GEMM_STATUS_NO_MEMORY;
 
 #if defined(ARCH_LOONGARCH64) && !defined(NO_AFFINITY)
   sa = (XFLOAT *)((BLASLONG)buffer + (WhereAmI() & 0xf) * GEMM_OFFSET_A);

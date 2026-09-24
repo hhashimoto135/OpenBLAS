@@ -54,6 +54,23 @@ char* openblas_get_config(void);
 /*Get the CPU corename on runtime.*/
 char* openblas_get_corename(void);
 
+/* Per-thread flag, non-zero when an OpenBLAS call in this thread returned
+ * without doing its work because memory could not be obtained: no work buffer
+ * was free or one could not be mapped, or a temporary of the bfloat16 paths
+ * could not be allocated. It is one flag per process where the compiler has
+ * no thread-local storage, and in the single-buffer allocator of PPC440
+ * builds. The routines that return a status report the same
+ * failure through it; the standard void routines, and LAPACK routines whose
+ * BLAS calls fail, leave only this flag. Clear it before a call and inspect it
+ * after. Set by every routine built from interface/gemm.c, gemm_compute.c,
+ * gemv.c, ger.c, symv.c, syr2.c, syr2k.c, trmv.c and trsm.c (so also ?trsm,
+ * ?her2k, ?gemm3m and the complex routines those files build), by the bfloat16
+ * temporaries of cblas_sbgemm, the packed API and cblas_sbgemv, and by the
+ * small-matrix SBGEMM kernel; other routines keep upstream's behaviour. In a
+ * threaded build, a failure on a worker thread sets that thread's flag. */
+int  openblas_alloc_failed(void);
+void openblas_clear_alloc_failed(void);
+
 /*Set the threading backend to a custom callback.*/
 typedef void (*openblas_dojob_callback)(int thread_num, void *jobdata, int dojob_data);
 typedef void (*openblas_threads_callback)(int sync, openblas_dojob_callback dojob, int numjobs, size_t jobdata_elsize, void *jobdata, int dojob_data);
@@ -118,14 +135,16 @@ typedef enum CBLAS_STORAGE    {CblasPacked=151} CBLAS_STORAGE;
  * cblas_sbgemm_status. 0 means the routine did its work. A positive value is
  * the number of the argument that was rejected, which xerbla has also been
  * told. The negative values below name failures that are not tied to one
- * argument. C is never touched on failure; a failed pack leaves dest untouched
- * for a rejected argument and TOO_LARGE, and otherwise leaves no valid header
- * behind, so that a later cblas_?gemm_compute rejects the buffer. xerbla
+ * argument. C is not touched when an argument is rejected; after NO_MEMORY it
+ * may hold part of the product, and a kernel that fails partway may report only
+ * through openblas_alloc_failed(). A failed pack leaves dest
+ * untouched for a rejected argument and TOO_LARGE, and otherwise leaves no
+ * valid header behind, so that a later cblas_?gemm_compute rejects the buffer. xerbla
  * receives parameter 0 for the first two codes, the other two print a message
  * through openblas_warning instead. */
 #define OPENBLAS_GEMM_STATUS_TOO_LARGE (-1) /* the packed size does not fit; cblas_?gemm_pack_get_size returns 0 for these dimensions */
 #define OPENBLAS_GEMM_STATUS_INTERNAL  (-2) /* the panels written disagree with the size computed in closed form */
-#define OPENBLAS_GEMM_STATUS_NO_MEMORY (-3) /* a temporary buffer of the single precision bfloat16 fallback could not be allocated */
+#define OPENBLAS_GEMM_STATUS_NO_MEMORY (-3) /* a work buffer or a temporary could not be obtained; openblas_alloc_failed() is set as well */
 #define OPENBLAS_GEMM_STATUS_NO_KERNEL (-4) /* the bfloat16 kernels cannot run in this process and no fallback is compiled in */
 	
 float  cblas_sdsdot(OPENBLAS_CONST blasint n, OPENBLAS_CONST float alpha, OPENBLAS_CONST float *x, OPENBLAS_CONST blasint incx, OPENBLAS_CONST float *y, OPENBLAS_CONST blasint incy);
@@ -532,9 +551,9 @@ void cblas_bgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLA
 		    OPENBLAS_CONST bfloat16 alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST bfloat16 beta, bfloat16 *C, OPENBLAS_CONST blasint ldc);
 void   cblas_sbgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
 		    OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
-/* cblas_sbgemm with a return value: 0 when C was updated, otherwise C is untouched and the value is an
- * OPENBLAS_GEMM_STATUS_* code or the number of the rejected argument. cblas_sbgemm itself keeps the
- * standard void signature and reports through xerbla and openblas_warning only. */
+/* cblas_sbgemm with a return value: 0 when the routine did its work, otherwise an
+ * OPENBLAS_GEMM_STATUS_* code or the number of the rejected argument (see above). cblas_sbgemm itself keeps the
+ * standard void signature and reports through xerbla, openblas_warning and openblas_alloc_failed() only. */
 int    cblas_sbgemm_status(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
 		    OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
 /* Packed GEMM for bfloat16 inputs with float accumulation, see cblas_sgemm_pack_get_size, cblas_sgemm_pack, and cblas_sgemm_compute. */

@@ -63,6 +63,22 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 
+/* STACK_ALLOC whose heap fallback is blas_memory_alloc_try: BUFFER is NULL
+ * when no buffer could be had, and the caller returns without computing.
+ * STACK_FREE releases it the same way. */
+#if defined(MAX_STACK_ALLOC) && MAX_STACK_ALLOC > 0
+
+#define STACK_ALLOC_TRY(SIZE, TYPE, BUFFER)                                    \
+  volatile int stack_alloc_size = SIZE;                                        \
+  if (stack_alloc_size > MAX_STACK_ALLOC / sizeof(TYPE)) stack_alloc_size = 0; \
+  STACK_ALLOC_PROTECT_SET                                                      \
+  TYPE stack_buffer[stack_alloc_size ? stack_alloc_size : 1]                   \
+      __attribute__((aligned(0x20)));                                          \
+  BUFFER = stack_alloc_size ? stack_buffer : (TYPE *)blas_memory_alloc_try(1);
+#else
+  #define STACK_ALLOC_TRY(SIZE, TYPE, BUFFER) BUFFER = (TYPE *)blas_memory_alloc_try(1)
+#endif
+
 #if defined(MAX_STACK_ALLOC) && MAX_STACK_ALLOC > 0
 #define STACK_FREE(BUFFER)    \
   STACK_ALLOC_PROTECT_CHECK   \

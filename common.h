@@ -752,6 +752,15 @@ void *blas_memory_alloc  (int);
 void  blas_memory_free   (void *);
 void *blas_memory_alloc_nolock  (int); //use malloc without blas_lock
 void  blas_memory_free_nolock   (void *);
+/* blas_memory_alloc that returns NULL, with the calling thread's failure flag
+ * set, instead of ending the process when no buffer can be had. Callers that
+ * report to the application use it; see driver/others/memory.c. */
+void *blas_memory_alloc_try (int);
+/* Sets the calling thread's failure flag; for allocations made on behalf of a
+ * call outside blas_memory_alloc, such as the bfloat16 temporaries. */
+void  blas_memory_note_failure (void);
+int   openblas_alloc_failed (void);
+void  openblas_clear_alloc_failed (void);
 
 int  get_num_procs (void);
 

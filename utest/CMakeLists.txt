@@ -86,6 +86,7 @@ ${DIR_EXT}/test_zgemm.c
 ${DIR_EXT}/test_cgemm.c
 ${DIR_EXT}/test_sgemm_pack.c
 ${DIR_EXT}/test_dgemm_pack.c
+${DIR_EXT}/test_alloc_failed.c
 )
 if (BUILD_BFLOAT16)
 set(OpenBLAS_utest_ext_src

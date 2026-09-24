@@ -30,7 +30,7 @@ OBJS_EXT+=$(DIR_EXT)/test_cgemv_t.o $(DIR_EXT)/test_zgemv_t.o $(DIR_EXT)/test_cg
 OBJS_EXT+=$(DIR_EXT)/test_sgemmt.o $(DIR_EXT)/test_dgemmt.o $(DIR_EXT)/test_cgemmt.o $(DIR_EXT)/test_zgemmt.o
 OBJS_EXT+=$(DIR_EXT)/test_ztrmv.o $(DIR_EXT)/test_ctrmv.o $(DIR_EXT)/test_ztrsv.o $(DIR_EXT)/test_ctrsv.o
 OBJS_EXT+=$(DIR_EXT)/test_zgemm.o $(DIR_EXT)/test_cgemm.o $(DIR_EXT)/test_zgbmv.o $(DIR_EXT)/test_cgbmv.o
-OBJS_EXT+=$(DIR_EXT)/test_sgemm_pack.o $(DIR_EXT)/test_dgemm_pack.o
+OBJS_EXT+=$(DIR_EXT)/test_sgemm_pack.o $(DIR_EXT)/test_dgemm_pack.o $(DIR_EXT)/test_alloc_failed.o
 ifeq ($(BUILD_BFLOAT16),1)
 OBJS_EXT+=$(DIR_EXT)/test_sbgemm_pack.o
 endif

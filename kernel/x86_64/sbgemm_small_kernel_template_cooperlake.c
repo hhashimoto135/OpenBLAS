@@ -63,6 +63,8 @@ extern void sbgemm_blocking_kernel_tt_one(blasint M, blasint N, blasint K, float
 	raw_ptr = malloc((size) + 63); \
 	ptr = (bfloat16 *)(((uintptr_t) raw_ptr + 63) & ~(uintptr_t)63)
 
+extern void openblas_warning(int verbose, const char *msg);
+
 
 #if defined(B0)
 int CNAME(BLASLONG M, BLASLONG N, BLASLONG K, IFLOAT * A, BLASLONG lda, FLOAT alpha, IFLOAT * B, BLASLONG ldb, FLOAT * C, BLASLONG ldc)
@@ -77,6 +79,16 @@ int CNAME(BLASLONG M, BLASLONG N, BLASLONG K, IFLOAT * A, BLASLONG lda, FLOAT al
 
 	MALLOC_ALIGN64(block_A, sizeof(bfloat16) * BF16_BLOCK_THRES_K * BF16_BLOCK_THRES_M, raw_ptrA);
 	MALLOC_ALIGN64(block_B, sizeof(bfloat16) * BF16_BLOCK_THRES_N * BF16_BLOCK_THRES_K, raw_ptrB);
+
+	/* The thread's failure flag says so, and the non-zero return lets
+	 * interface/gemm.c answer NO_MEMORY. */
+	if (raw_ptrA == NULL || raw_ptrB == NULL) {
+		free(raw_ptrA);
+		free(raw_ptrB);
+		openblas_warning(0, "sbgemm: cannot allocate the blocks of the small-matrix kernel, the call is skipped\n");
+		blas_memory_note_failure();
+		return 1;
+	}
 
 #if defined(B0)
 	sbgemm_zero_operation(M, N, C, ldc);

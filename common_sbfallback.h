@@ -155,11 +155,18 @@ static inline float *sbgemm_expand_to_float(bfloat16 *src, BLASLONG rows, BLASLO
   BLASLONG j;
 
   if (rows < 0 || cols < 0) return NULL;
-  if (cols != 0 && (size_t)rows > (SIZE_MAX / sizeof(float)) / (size_t)cols) return NULL;
+  if (cols != 0 && (size_t)rows > (SIZE_MAX / sizeof(float)) / (size_t)cols) {
+    blas_memory_note_failure();
+    return NULL;
+  }
 
   count = (size_t)rows * (size_t)cols;
   dest = (float *)malloc((count != 0 ? count : 1) * sizeof(float));
-  if (dest == NULL) return NULL;
+  if (dest == NULL) {
+    /* The thread's failure flag, for callers that cannot see the status. */
+    blas_memory_note_failure();
+    return NULL;
+  }
   /* Nothing to read, and `src` may legitimately be NULL for an empty
    * operand. */
   if (count == 0) return dest;

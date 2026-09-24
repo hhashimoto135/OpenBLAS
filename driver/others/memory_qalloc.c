@@ -83,6 +83,30 @@ void blas_memory_free(void *free_area){
   return;
 }
 
+/* The failure flag and the try wrapper of memory.c, which the interface
+ * routines call. This allocator hands every caller the same buffer, so the
+ * flag is one per process and blas_memory_alloc_try() fails only when that
+ * buffer could not be allocated. */
+static int blas_alloc_failed = 0;
+
+void blas_memory_note_failure(void) {
+  blas_alloc_failed = 1;
+}
+
+int openblas_alloc_failed(void) {
+  return blas_alloc_failed;
+}
+
+void openblas_clear_alloc_failed(void) {
+  blas_alloc_failed = 0;
+}
+
+void *blas_memory_alloc_try(int numproc){
+  void *buffer = blas_memory_alloc(numproc);
+  if (buffer == NULL) blas_memory_note_failure();
+  return buffer;
+}
+
 
 
 extern void openblas_warning(int verbose, const char * msg);

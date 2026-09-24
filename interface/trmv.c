@@ -215,7 +215,9 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_UPLO Uplo,
 
   if (incx < 0 ) x -= (n - 1) * incx;
 
-  buffer = (FLOAT *)blas_memory_alloc(1);
+  buffer = (FLOAT *)blas_memory_alloc_try(1);
+  /* No work buffer: the thread's failure flag is set. */
+  if (buffer == NULL) return;
 
 #ifdef SMP
   nthreads = num_cpu_avail(2);

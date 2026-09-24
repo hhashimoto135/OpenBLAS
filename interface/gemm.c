@@ -637,6 +637,7 @@ else
   if (sbgemm_float_fallback()) {
     float sgemm_alpha = *(FLOAT *)args.alpha;
     float sgemm_beta  = *(FLOAT *)args.beta;
+    int sgemm_failed = 0;
     /* level3.c applies beta and returns without ever reading A or B when k or
      * alpha is zero. Expanding them would be the dominant cost of a call that
      * only scales C, so the operands are left out and k is passed as zero,
@@ -655,7 +656,8 @@ else
       free(a_float);
       free(b_float);
       /* C is left untouched. cblas_sbgemm_status reports it; cblas_sbgemm and
-       * sbgemm_ have only the message. */
+       * sbgemm_ have the message and the thread's failure flag, which
+       * sbgemm_expand_to_float has set. */
       openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
       GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
     }
@@ -667,6 +669,12 @@ else
       blasint sgemm_lda = (blasint)sbgemm_expanded_ld(a_rows);
       blasint sgemm_ldb = (blasint)sbgemm_expanded_ld(b_rows);
       blasint sgemm_ldc = (blasint)args.ldc;
+      /* SGEMM reports a missing work buffer only through the thread's flag.
+       * Read it around the call, so that the status can say NO_MEMORY, and
+       * leave the flag as the caller would have found it plus this failure. */
+      int flag_before = openblas_alloc_failed();
+
+      openblas_clear_alloc_failed();
 
       /* args is in the internal column-major orientation, so the product goes
        * to the column-major SGEMM of the same interface as this entry point:
@@ -684,10 +692,14 @@ else
                       &sgemm_alpha, a_float, &sgemm_lda, b_float, &sgemm_ldb,
                       &sgemm_beta, (float *)args.c, &sgemm_ldc);
 #endif
+
+      sgemm_failed = openblas_alloc_failed();
+      if (flag_before) blas_memory_note_failure();
     }
 
     free(a_float);
     free(b_float);
+    if (sgemm_failed) GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
     GEMM_RETURN(0);
   }
 #endif
@@ -771,11 +783,18 @@ else
 #if USE_SMALL_MATRIX_OPT
 #if !defined(COMPLEX)
   if(GEMM_SMALL_MATRIX_PERMIT(transa, transb, args.m, args.n, args.k, *(FLOAT *)(args.alpha), *(FLOAT *)(args.beta))){
+	  int small_status;
 	  if(*(FLOAT *)(args.beta) == 0.0){
-		(GEMM_SMALL_KERNEL_B0((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, args.c, args.ldc);
+		small_status = (GEMM_SMALL_KERNEL_B0((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, args.c, args.ldc);
 	  }else{
-		(GEMM_SMALL_KERNEL((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, *(FLOAT *)(args.beta), args.c, args.ldc);
+		small_status = (GEMM_SMALL_KERNEL((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, *(FLOAT *)(args.beta), args.c, args.ldc);
 	  }
+	  /* The x86-64 small kernels return non-zero when they could not allocate
+	   * their scratch, with the thread's failure flag set. The value only
+	   * matters for cblas_sbgemm_status, whose small kernels return 0 on
+	   * success: GEMM_RETURN drops it everywhere else, where some kernels
+	   * (LoongArch's LASX DGEMM ones) return M. */
+	  if (small_status != 0) GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
 	  GEMM_RETURN(0);
   }
 #else
@@ -790,7 +809,10 @@ else
 #endif
 #endif
 
-  buffer = (XFLOAT *)blas_memory_alloc(0);
+  buffer = (XFLOAT *)blas_memory_alloc_try(0);
+  /* No work buffer: the thread's failure flag is set, and cblas_sbgemm_status
+   * says so. */
+  if (buffer == NULL) GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
 
 //For LOONGARCH64, applying an offset to the buffer is essential
 //for minimizing cache conflicts and optimizing performance.

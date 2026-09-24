@@ -1,0 +1,1152 @@
+diff --git a/cblas.h b/cblas.h
+index 0999a5d66..4ad411c3b 100644
+--- a/cblas.h
++++ b/cblas.h
+@@ -54,6 +54,23 @@ char* openblas_get_config(void);
+ /*Get the CPU corename on runtime.*/
+ char* openblas_get_corename(void);
+ 
++/* Per-thread flag, non-zero when an OpenBLAS call in this thread returned
++ * without doing its work because memory could not be obtained: no work buffer
++ * was free or one could not be mapped, or a temporary of the bfloat16 paths
++ * could not be allocated. It is one flag per process where the compiler has
++ * no thread-local storage, and in the single-buffer allocator of PPC440
++ * builds. The routines that return a status report the same
++ * failure through it; the standard void routines, and LAPACK routines whose
++ * BLAS calls fail, leave only this flag. Clear it before a call and inspect it
++ * after. Set by every routine built from interface/gemm.c, gemm_compute.c,
++ * gemv.c, ger.c, symv.c, syr2.c, syr2k.c, trmv.c and trsm.c (so also ?trsm,
++ * ?her2k, ?gemm3m and the complex routines those files build), by the bfloat16
++ * temporaries of cblas_sbgemm, the packed API and cblas_sbgemv, and by the
++ * small-matrix SBGEMM kernel; other routines keep upstream's behaviour. In a
++ * threaded build, a failure on a worker thread sets that thread's flag. */
++int  openblas_alloc_failed(void);
++void openblas_clear_alloc_failed(void);
++
+ /*Set the threading backend to a custom callback.*/
+ typedef void (*openblas_dojob_callback)(int thread_num, void *jobdata, int dojob_data);
+ typedef void (*openblas_threads_callback)(int sync, openblas_dojob_callback dojob, int numjobs, size_t jobdata_elsize, void *jobdata, int dojob_data);
+@@ -118,14 +135,16 @@ typedef enum CBLAS_STORAGE    {CblasPacked=151} CBLAS_STORAGE;
+  * cblas_sbgemm_status. 0 means the routine did its work. A positive value is
+  * the number of the argument that was rejected, which xerbla has also been
+  * told. The negative values below name failures that are not tied to one
+- * argument. C is never touched on failure; a failed pack leaves dest untouched
+- * for a rejected argument and TOO_LARGE, and otherwise leaves no valid header
+- * behind, so that a later cblas_?gemm_compute rejects the buffer. xerbla
++ * argument. C is not touched when an argument is rejected; after NO_MEMORY it
++ * may hold part of the product, and a kernel that fails partway may report only
++ * through openblas_alloc_failed(). A failed pack leaves dest
++ * untouched for a rejected argument and TOO_LARGE, and otherwise leaves no
++ * valid header behind, so that a later cblas_?gemm_compute rejects the buffer. xerbla
+  * receives parameter 0 for the first two codes, the other two print a message
+  * through openblas_warning instead. */
+ #define OPENBLAS_GEMM_STATUS_TOO_LARGE (-1) /* the packed size does not fit; cblas_?gemm_pack_get_size returns 0 for these dimensions */
+ #define OPENBLAS_GEMM_STATUS_INTERNAL  (-2) /* the panels written disagree with the size computed in closed form */
+-#define OPENBLAS_GEMM_STATUS_NO_MEMORY (-3) /* a temporary buffer of the single precision bfloat16 fallback could not be allocated */
++#define OPENBLAS_GEMM_STATUS_NO_MEMORY (-3) /* a work buffer or a temporary could not be obtained; openblas_alloc_failed() is set as well */
+ #define OPENBLAS_GEMM_STATUS_NO_KERNEL (-4) /* the bfloat16 kernels cannot run in this process and no fallback is compiled in */
+ 	
+ float  cblas_sdsdot(OPENBLAS_CONST blasint n, OPENBLAS_CONST float alpha, OPENBLAS_CONST float *x, OPENBLAS_CONST blasint incx, OPENBLAS_CONST float *y, OPENBLAS_CONST blasint incy);
+@@ -532,9 +551,9 @@ void cblas_bgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLA
+ 		    OPENBLAS_CONST bfloat16 alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST bfloat16 beta, bfloat16 *C, OPENBLAS_CONST blasint ldc);
+ void   cblas_sbgemm(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		    OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
+-/* cblas_sbgemm with a return value: 0 when C was updated, otherwise C is untouched and the value is an
+- * OPENBLAS_GEMM_STATUS_* code or the number of the rejected argument. cblas_sbgemm itself keeps the
+- * standard void signature and reports through xerbla and openblas_warning only. */
++/* cblas_sbgemm with a return value: 0 when the routine did its work, otherwise an
++ * OPENBLAS_GEMM_STATUS_* code or the number of the rejected argument (see above). cblas_sbgemm itself keeps the
++ * standard void signature and reports through xerbla, openblas_warning and openblas_alloc_failed() only. */
+ int    cblas_sbgemm_status(OPENBLAS_CONST enum CBLAS_ORDER Order, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransA, OPENBLAS_CONST enum CBLAS_TRANSPOSE TransB, OPENBLAS_CONST blasint M, OPENBLAS_CONST blasint N, OPENBLAS_CONST blasint K,
+ 		    OPENBLAS_CONST float alpha, OPENBLAS_CONST bfloat16 *A, OPENBLAS_CONST blasint lda, OPENBLAS_CONST bfloat16 *B, OPENBLAS_CONST blasint ldb, OPENBLAS_CONST float beta, float *C, OPENBLAS_CONST blasint ldc);
+ /* Packed GEMM for bfloat16 inputs with float accumulation, see cblas_sgemm_pack_get_size, cblas_sgemm_pack, and cblas_sgemm_compute. */
+diff --git a/common.h b/common.h
+index 336cb298e..d6a50ab7d 100644
+--- a/common.h
++++ b/common.h
+@@ -752,6 +752,15 @@ void *blas_memory_alloc  (int);
+ void  blas_memory_free   (void *);
+ void *blas_memory_alloc_nolock  (int); //use malloc without blas_lock
+ void  blas_memory_free_nolock   (void *);
++/* blas_memory_alloc that returns NULL, with the calling thread's failure flag
++ * set, instead of ending the process when no buffer can be had. Callers that
++ * report to the application use it; see driver/others/memory.c. */
++void *blas_memory_alloc_try (int);
++/* Sets the calling thread's failure flag; for allocations made on behalf of a
++ * call outside blas_memory_alloc, such as the bfloat16 temporaries. */
++void  blas_memory_note_failure (void);
++int   openblas_alloc_failed (void);
++void  openblas_clear_alloc_failed (void);
+ 
+ int  get_num_procs (void);
+ 
+diff --git a/common_sbfallback.h b/common_sbfallback.h
+index 97e959b6c..1c54d9c84 100644
+--- a/common_sbfallback.h
++++ b/common_sbfallback.h
+@@ -155,11 +155,18 @@ static inline float *sbgemm_expand_to_float(bfloat16 *src, BLASLONG rows, BLASLO
+   BLASLONG j;
+ 
+   if (rows < 0 || cols < 0) return NULL;
+-  if (cols != 0 && (size_t)rows > (SIZE_MAX / sizeof(float)) / (size_t)cols) return NULL;
++  if (cols != 0 && (size_t)rows > (SIZE_MAX / sizeof(float)) / (size_t)cols) {
++    blas_memory_note_failure();
++    return NULL;
++  }
+ 
+   count = (size_t)rows * (size_t)cols;
+   dest = (float *)malloc((count != 0 ? count : 1) * sizeof(float));
+-  if (dest == NULL) return NULL;
++  if (dest == NULL) {
++    /* The thread's failure flag, for callers that cannot see the status. */
++    blas_memory_note_failure();
++    return NULL;
++  }
+   /* Nothing to read, and `src` may legitimately be NULL for an empty
+    * operand. */
+   if (count == 0) return dest;
+diff --git a/common_stackalloc.h b/common_stackalloc.h
+index d3d54669c..ac9a21f88 100644
+--- a/common_stackalloc.h
++++ b/common_stackalloc.h
+@@ -63,6 +63,22 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ #endif
+ 
+ 
++/* STACK_ALLOC whose heap fallback is blas_memory_alloc_try: BUFFER is NULL
++ * when no buffer could be had, and the caller returns without computing.
++ * STACK_FREE releases it the same way. */
++#if defined(MAX_STACK_ALLOC) && MAX_STACK_ALLOC > 0
++
++#define STACK_ALLOC_TRY(SIZE, TYPE, BUFFER)                                    \
++  volatile int stack_alloc_size = SIZE;                                        \
++  if (stack_alloc_size > MAX_STACK_ALLOC / sizeof(TYPE)) stack_alloc_size = 0; \
++  STACK_ALLOC_PROTECT_SET                                                      \
++  TYPE stack_buffer[stack_alloc_size ? stack_alloc_size : 1]                   \
++      __attribute__((aligned(0x20)));                                          \
++  BUFFER = stack_alloc_size ? stack_buffer : (TYPE *)blas_memory_alloc_try(1);
++#else
++  #define STACK_ALLOC_TRY(SIZE, TYPE, BUFFER) BUFFER = (TYPE *)blas_memory_alloc_try(1)
++#endif
++
+ #if defined(MAX_STACK_ALLOC) && MAX_STACK_ALLOC > 0
+ #define STACK_FREE(BUFFER)    \
+   STACK_ALLOC_PROTECT_CHECK   \
+diff --git a/driver/others/memory.c b/driver/others/memory.c
+index e25dfbae6..1d103c1e5 100644
+--- a/driver/others/memory.c
++++ b/driver/others/memory.c
+@@ -84,6 +84,42 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ #endif
+ #endif
+ 
++/* Set when an allocation on behalf of a call in this thread failed and the
++ * call returned without doing its work: no work buffer was free or one could
++ * not be mapped (blas_memory_alloc_try below), or a temporary of the bfloat16
++ * paths could not be allocated (blas_memory_note_failure). Routines that
++ * cannot report through a return value, and LAPACK routines whose BLAS calls
++ * fail, leave this behind for the application, which reads it with
++ * openblas_alloc_failed() and clears it with openblas_clear_alloc_failed().
++ * One flag per thread, so that threads calling concurrently do not see each
++ * other's failures; a compiler without thread-local storage gets one flag per
++ * process. */
++#ifndef thread_local
++# if __STDC_VERSION__ >= 201112 && !defined __STDC_NO_THREADS__
++#  define thread_local _Thread_local
++# elif defined _WIN32 && (defined _MSC_VER || defined __ICL || defined __DMC__ || defined __BORLANDC__)
++#  define thread_local __declspec(thread)
++# elif (defined __GNUC__ || defined __SUNPRO_C || defined __xlC__) && !defined(__APPLE__)
++#  define thread_local __thread
++# else
++#  define thread_local
++# endif
++#endif
++
++static thread_local int blas_alloc_failed = 0;
++
++void blas_memory_note_failure(void) {
++  blas_alloc_failed = 1;
++}
++
++int openblas_alloc_failed(void) {
++  return blas_alloc_failed;
++}
++
++void openblas_clear_alloc_failed(void) {
++  blas_alloc_failed = 0;
++}
++
+ #if defined(USE_TLS) && defined(SMP)
+ #define COMPILE_TLS
+ 
+@@ -1329,6 +1365,16 @@ UNLOCK_COMMAND(&alloc_lock);
+   return NULL;
+ }
+ 
++/* The thread-local allocator returns NULL, after its own notice, when the
++ * thread's table is full; the try variant adds the failure flag so that the
++ * callers that return on NULL are not silent. A mapping failure still retries
++ * as upstream does. */
++void *blas_memory_alloc_try(int procpos){
++  void *buffer = blas_memory_alloc(procpos);
++  if (buffer == NULL) blas_memory_note_failure();
++  return buffer;
++}
++
+ void blas_memory_free(void *buffer){
+ #ifdef DEBUG
+   int position;
+@@ -2758,9 +2804,17 @@ static int memory_overflowed = 0;
+ /*                1 : Level 2 functions      */
+ /*                2 : Thread                 */
+ 
+-void *blas_memory_alloc(int procpos){
++/* blas_memory_alloc() behaves as upstream does: it ends the process when a
++ * region cannot be mapped after ten retries (in the auxiliary array too, where
++ * upstream retried for ever) and returns NULL after a notice when every region
++ * is in use. blas_memory_alloc_try() returns NULL in both cases, with the slot
++ * released again and the calling thread's failure flag set, for the routines
++ * that report to the application rather than compute with a buffer they do
++ * not have. Both are wrappers of this function. */
++static void *blas_memory_alloc_impl(int procpos, int try_only){
+ 
+   int i;
++  int failcount2 = 0;
+ 
+   int position;
+ #if defined(WHEREAMI) && !defined(USE_OPENMP)
+@@ -2982,6 +3036,7 @@ void *blas_memory_alloc(int procpos){
+ 	      base_address = 0UL;
+ 	      failcount++;
+ 	      if (failcount >10) {
++		      if (try_only) goto mapping_failed;
+ 		      fprintf(stderr, "OpenBLAS error: Memory allocation still failed after 10 retries, giving up.\n");
+ 		      exit(1);
+ 	      }
+@@ -3054,6 +3109,17 @@ void *blas_memory_alloc(int procpos){
+   MB;
+   new_release_info = (struct release_t*) malloc(NEW_BUFFERS * sizeof(struct release_t));
+   newmemory = (struct newmemstruct*) malloc(NEW_BUFFERS * sizeof(struct newmemstruct));
++  if (new_release_info == NULL || newmemory == NULL) {
++    /* The auxiliary array itself could not be allocated. In the locking builds
++     * alloc_lock is still held, so nobody has seen memory_overflowed yet; the
++     * USE_OPENMP builds take no lock here, as upstream. */
++    free((void *)new_release_info);
++    free((void *)newmemory);
++    new_release_info = NULL;
++    newmemory = NULL;
++    memory_overflowed = 0;
++    goto terminate;
++  }
+   for (i = 0; i < NEW_BUFFERS; i++) {
+   newmemory[i].addr   = (void *)0;
+ #if defined(WHEREAMI) && !defined(USE_OPENMP)
+@@ -3070,6 +3136,10 @@ allocation2:
+ #else
+   blas_unlock((BLASULONG *)&newmemory[position-NUM_BUFFERS].lock);
+ #endif
++  /* Upstream mapped a new region every time an auxiliary slot was taken,
++   * leaking the previous one and eventually overrunning new_release_info.
++   * A slot that already has its region keeps it, as in the first array. */
++  if (!newmemory[position-NUM_BUFFERS].addr) {
+     do {
+ #ifdef DEBUG
+       printf("Allocation Start : %lx\n", base_address);
+@@ -3120,7 +3190,18 @@ allocation2:
+ #ifdef DEBUG
+       printf("  Success -> %08lx\n", map_address);
+ #endif
+-      if (((BLASLONG) map_address) == -1) base_address = 0UL;
++      if (((BLASLONG) map_address) == -1) {
++	      base_address = 0UL;
++	      /* Upstream retried for ever here; give up as the first array does. */
++	      failcount2++;
++	      if (failcount2 >10) {
++		      if (try_only) goto mapping_failed2;
++		      fprintf(stderr, "OpenBLAS error: Memory allocation still failed after 10 retries, giving up.\n");
++		      exit(1);
++	      }
++      } else {
++	      failcount2 = 0;
++      }
+ 
+       if (base_address) base_address += BUFFER_SIZE + FIXED_PAGESIZE;
+ 
+@@ -3137,6 +3218,7 @@ allocation2:
+ #ifdef DEBUG
+     printf("  Mapping Succeeded. %p(%d)\n", (void *)newmemory[position-NUM_BUFFERS].addr, position);
+ #endif
++  }
+ 
+ #if defined(WHEREAMI) && !defined(USE_OPENMP)
+ 
+@@ -3145,10 +3227,45 @@ allocation2:
+ #endif
+   return (void *)newmemory[position-NUM_BUFFERS].addr;
+ 
++  /* try_only, after the OS refused the mapping: give the slot back the way
++   * blas_memory_free does and tell the caller. */
++ mapping_failed:
++#if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
++  LOCK_COMMAND(&alloc_lock);
++#endif
++  WMB;
++  memory[position].used = 0;
++#if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
++  UNLOCK_COMMAND(&alloc_lock);
++#endif
++  blas_memory_note_failure();
++  openblas_warning(0, "OpenBLAS : cannot map a work buffer, the call is skipped\n");
++  return NULL;
++
++ mapping_failed2:
++#if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
++  LOCK_COMMAND(&alloc_lock);
++#endif
++  WMB;
++  newmemory[position-NUM_BUFFERS].used = 0;
++#if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
++  UNLOCK_COMMAND(&alloc_lock);
++#endif
++  blas_memory_note_failure();
++  openblas_warning(0, "OpenBLAS : cannot map a work buffer, the call is skipped\n");
++  return NULL;
++
+ terminate:
+ #if (defined(SMP) || defined(USE_LOCKING)) && !defined(USE_OPENMP)
+     UNLOCK_COMMAND(&alloc_lock);
+ #endif
++  if (try_only) {
++    /* Every buffer is in use: more calls are inside OpenBLAS at once than
++     * this build has buffers for (NUM_BUFFERS, from NUM_THREADS). */
++    blas_memory_note_failure();
++    openblas_warning(0, "OpenBLAS : no work buffer is free, the call is skipped\n");
++    return NULL;
++  }
+   printf("OpenBLAS : Program is Terminated. Because you tried to allocate too many memory regions.\n");
+   printf("This library was built to support a maximum of %d threads - either rebuild OpenBLAS\n", NUM_BUFFERS);
+ #ifdef USE_OPENMP
+@@ -3162,6 +3279,14 @@ terminate:
+   return NULL;
+ }
+ 
++void *blas_memory_alloc(int procpos){
++  return blas_memory_alloc_impl(procpos, 0);
++}
++
++void *blas_memory_alloc_try(int procpos){
++  return blas_memory_alloc_impl(procpos, 1);
++}
++
+ void blas_memory_free(void *free_area){
+ 
+   int position;
+diff --git a/driver/others/memory_qalloc.c b/driver/others/memory_qalloc.c
+index eea897acc..2b2d77706 100644
+--- a/driver/others/memory_qalloc.c
++++ b/driver/others/memory_qalloc.c
+@@ -83,6 +83,30 @@ void blas_memory_free(void *free_area){
+   return;
+ }
+ 
++/* The failure flag and the try wrapper of memory.c, which the interface
++ * routines call. This allocator hands every caller the same buffer, so the
++ * flag is one per process and blas_memory_alloc_try() fails only when that
++ * buffer could not be allocated. */
++static int blas_alloc_failed = 0;
++
++void blas_memory_note_failure(void) {
++  blas_alloc_failed = 1;
++}
++
++int openblas_alloc_failed(void) {
++  return blas_alloc_failed;
++}
++
++void openblas_clear_alloc_failed(void) {
++  blas_alloc_failed = 0;
++}
++
++void *blas_memory_alloc_try(int numproc){
++  void *buffer = blas_memory_alloc(numproc);
++  if (buffer == NULL) blas_memory_note_failure();
++  return buffer;
++}
++
+ 
+ 
+ extern void openblas_warning(int verbose, const char * msg);
+diff --git a/exports/gensymbol b/exports/gensymbol
+index 0c67aa594..5d02d87df 100755
+--- a/exports/gensymbol
++++ b/exports/gensymbol
+@@ -183,6 +183,8 @@ misc_no_underscore_objs="
+     goto_set_num_threads
+     openblas_get_config
+     openblas_get_corename
++    openblas_alloc_failed
++    openblas_clear_alloc_failed
+     openblas_set_threads_callback_function
+     openblas_set_xerbla
+ "
+diff --git a/exports/gensymbol.pl b/exports/gensymbol.pl
+index 074b4ccd0..a6b75229b 100644
+--- a/exports/gensymbol.pl
++++ b/exports/gensymbol.pl
+@@ -180,6 +180,8 @@
+     goto_set_num_threads,
+     openblas_get_config,
+     openblas_get_corename,
++    openblas_alloc_failed,
++    openblas_clear_alloc_failed,
+     openblas_set_threads_callback_function,
+     openblas_set_xerbla,
+ );
+diff --git a/interface/gemm.c b/interface/gemm.c
+index 6c219b43d..de934e297 100644
+--- a/interface/gemm.c
++++ b/interface/gemm.c
+@@ -637,6 +637,7 @@ else
+   if (sbgemm_float_fallback()) {
+     float sgemm_alpha = *(FLOAT *)args.alpha;
+     float sgemm_beta  = *(FLOAT *)args.beta;
++    int sgemm_failed = 0;
+     /* level3.c applies beta and returns without ever reading A or B when k or
+      * alpha is zero. Expanding them would be the dominant cost of a call that
+      * only scales C, so the operands are left out and k is passed as zero,
+@@ -655,7 +656,8 @@ else
+       free(a_float);
+       free(b_float);
+       /* C is left untouched. cblas_sbgemm_status reports it; cblas_sbgemm and
+-       * sbgemm_ have only the message. */
++       * sbgemm_ have the message and the thread's failure flag, which
++       * sbgemm_expand_to_float has set. */
+       openblas_warning(0, SBGEMM_FALLBACK_NO_MEMORY);
+       GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
+     }
+@@ -667,6 +669,12 @@ else
+       blasint sgemm_lda = (blasint)sbgemm_expanded_ld(a_rows);
+       blasint sgemm_ldb = (blasint)sbgemm_expanded_ld(b_rows);
+       blasint sgemm_ldc = (blasint)args.ldc;
++      /* SGEMM reports a missing work buffer only through the thread's flag.
++       * Read it around the call, so that the status can say NO_MEMORY, and
++       * leave the flag as the caller would have found it plus this failure. */
++      int flag_before = openblas_alloc_failed();
++
++      openblas_clear_alloc_failed();
+ 
+       /* args is in the internal column-major orientation, so the product goes
+        * to the column-major SGEMM of the same interface as this entry point:
+@@ -684,10 +692,14 @@ else
+                       &sgemm_alpha, a_float, &sgemm_lda, b_float, &sgemm_ldb,
+                       &sgemm_beta, (float *)args.c, &sgemm_ldc);
+ #endif
++
++      sgemm_failed = openblas_alloc_failed();
++      if (flag_before) blas_memory_note_failure();
+     }
+ 
+     free(a_float);
+     free(b_float);
++    if (sgemm_failed) GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
+     GEMM_RETURN(0);
+   }
+ #endif
+@@ -771,11 +783,18 @@ else
+ #if USE_SMALL_MATRIX_OPT
+ #if !defined(COMPLEX)
+   if(GEMM_SMALL_MATRIX_PERMIT(transa, transb, args.m, args.n, args.k, *(FLOAT *)(args.alpha), *(FLOAT *)(args.beta))){
++	  int small_status;
+ 	  if(*(FLOAT *)(args.beta) == 0.0){
+-		(GEMM_SMALL_KERNEL_B0((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, args.c, args.ldc);
++		small_status = (GEMM_SMALL_KERNEL_B0((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, args.c, args.ldc);
+ 	  }else{
+-		(GEMM_SMALL_KERNEL((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, *(FLOAT *)(args.beta), args.c, args.ldc);
++		small_status = (GEMM_SMALL_KERNEL((transb << 2) | transa))(args.m, args.n, args.k, args.a, args.lda, *(FLOAT *)(args.alpha), args.b, args.ldb, *(FLOAT *)(args.beta), args.c, args.ldc);
+ 	  }
++	  /* The x86-64 small kernels return non-zero when they could not allocate
++	   * their scratch, with the thread's failure flag set. The value only
++	   * matters for cblas_sbgemm_status, whose small kernels return 0 on
++	   * success: GEMM_RETURN drops it everywhere else, where some kernels
++	   * (LoongArch's LASX DGEMM ones) return M. */
++	  if (small_status != 0) GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
+ 	  GEMM_RETURN(0);
+   }
+ #else
+@@ -790,7 +809,10 @@ else
+ #endif
+ #endif
+ 
+-  buffer = (XFLOAT *)blas_memory_alloc(0);
++  buffer = (XFLOAT *)blas_memory_alloc_try(0);
++  /* No work buffer: the thread's failure flag is set, and cblas_sbgemm_status
++   * says so. */
++  if (buffer == NULL) GEMM_RETURN(OPENBLAS_GEMM_STATUS_NO_MEMORY);
+ 
+ //For LOONGARCH64, applying an offset to the buffer is essential
+ //for minimizing cache conflicts and optimizing performance.
+diff --git a/interface/gemm_compute.c b/interface/gemm_compute.c
+index aa899855c..69f910273 100644
+--- a/interface/gemm_compute.c
++++ b/interface/gemm_compute.c
+@@ -46,12 +46,15 @@
+  * where alpha is the product of the alphas recorded in the packed operand(s),
+  * or 1 when neither operand is packed.
+  *
+- * The scratch buffer for the operand that is not packed comes from
+- * blas_memory_alloc, exactly as for a regular GEMM, so concurrent calls from
+- * several threads are safe and may share one read-only packed buffer.
++ * The scratch buffer for the operand that is not packed comes from the same
++ * pool as a regular GEMM's, so concurrent calls from several threads are safe
++ * and may share one read-only packed buffer. When no buffer can be had, the
++ * call returns OPENBLAS_GEMM_STATUS_NO_MEMORY before touching C; the packed
++ * operands are checked only after the buffer is taken, so a stale packed
++ * buffer is then reported as NO_MEMORY rather than by its position.
+  *
+- * Returns 0 when C was updated. Otherwise C is untouched and the value says
+- * why: the number of the rejected argument (a packed buffer that does not fit
++ * Returns 0 when the routine did its work. Otherwise the value says why: the
++ * number of the rejected argument (a packed buffer that does not fit
+  * the product is reported at its argument position, 7 or 9), or one of the
+  * negative OPENBLAS_GEMM_STATUS_* codes of cblas.h. MKL declares the routine
+  * void; callers written for MKL may keep ignoring the result.
+@@ -160,7 +163,8 @@ int CNAME(enum CBLAS_ORDER order, blasint transa, blasint transb, blasint m, bla
+ 
+   if (gemm_packed_kernels_ready() != 0) return OPENBLAS_GEMM_STATUS_NO_KERNEL;
+ 
+-  buffer = (XFLOAT *)blas_memory_alloc(0);
++  buffer = (XFLOAT *)blas_memory_alloc_try(0);
++  if (buffer == NULL) return OPENBLAS_GEMM_STATUS_NO_MEMORY;
+ 
+ #if defined(ARCH_LOONGARCH64) && !defined(NO_AFFINITY)
+   sa = (XFLOAT *)((BLASLONG)buffer + (WhereAmI() & 0xf) * GEMM_OFFSET_A);
+diff --git a/interface/gemv.c b/interface/gemv.c
+index 79589d808..99fba9ab5 100644
+--- a/interface/gemv.c
++++ b/interface/gemv.c
+@@ -283,7 +283,9 @@ void CNAME(enum CBLAS_ORDER order,
+ #endif
+   // for alignment
+   buffer_size = (buffer_size + 3) & ~3;
+-  STACK_ALLOC(buffer_size, FLOAT, buffer);
++  STACK_ALLOC_TRY(buffer_size, FLOAT, buffer);
++  /* No work buffer: the thread's failure flag is set. */
++  if (buffer == NULL) return;
+ 
+ #ifdef SMP
+   nthreads = get_gemv_optimal_nthreads(1L * m * n);
+diff --git a/interface/ger.c b/interface/ger.c
+index 640b8cb44..4a0208fe5 100644
+--- a/interface/ger.c
++++ b/interface/ger.c
+@@ -176,7 +176,9 @@ void CNAME(enum CBLAS_ORDER order,
+   if (incy < 0) y -= (n - 1) * incy;
+   if (incx < 0) x -= (m - 1) * incx;
+ 
+-  STACK_ALLOC(m, FLOAT, buffer);
++  STACK_ALLOC_TRY(m, FLOAT, buffer);
++  /* No work buffer: the thread's failure flag is set. */
++  if (buffer == NULL) return;
+ 
+ #ifdef SMPTEST
+   // Threshold chosen so that speed-up is > 1 on a Xeon E5-2630
+diff --git a/interface/symv.c b/interface/symv.c
+index 1f23ce4ee..784aaef60 100644
+--- a/interface/symv.c
++++ b/interface/symv.c
+@@ -177,7 +177,9 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_UPLO Uplo, blasint n, FLOAT alpha,
+   if (incx < 0 ) x -= (n - 1) * incx;
+   if (incy < 0 ) y -= (n - 1) * incy;
+ 
+-  buffer = (FLOAT *)blas_memory_alloc(1);
++  buffer = (FLOAT *)blas_memory_alloc_try(1);
++  /* No work buffer: the thread's failure flag is set. */
++  if (buffer == NULL) return;
+ 
+ #ifdef SMP
+   if (n <200)
+diff --git a/interface/syr2.c b/interface/syr2.c
+index b983fa0d6..4dee41d2c 100644
+--- a/interface/syr2.c
++++ b/interface/syr2.c
+@@ -194,7 +194,9 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_UPLO Uplo, blasint n, FLOAT alpha,
+   if (incx < 0 ) x -= (n - 1) * incx;
+   if (incy < 0 ) y -= (n - 1) * incy;
+ 
+-  buffer = (FLOAT *)blas_memory_alloc(1);
++  buffer = (FLOAT *)blas_memory_alloc_try(1);
++  /* No work buffer: the thread's failure flag is set. */
++  if (buffer == NULL) return;
+ 
+ #ifdef SMP
+   nthreads = num_cpu_avail(2);
+diff --git a/interface/syr2k.c b/interface/syr2k.c
+index bfdc1c029..d5545cc1b 100644
+--- a/interface/syr2k.c
++++ b/interface/syr2k.c
+@@ -390,7 +390,9 @@ if (strcmp(gotoblas_corename(), "armv9sme") == 0
+ 
+   FUNCTION_PROFILE_START();
+ 
+-  buffer = (FLOAT *)blas_memory_alloc(0);
++  buffer = (FLOAT *)blas_memory_alloc_try(0);
++  /* No work buffer: the thread's failure flag is set. */
++  if (buffer == NULL) return;
+ 
+   sa = (FLOAT *)((BLASLONG)buffer + GEMM_OFFSET_A);
+   sb = (FLOAT *)(((BLASLONG)sa + ((GEMM_P * GEMM_Q * COMPSIZE * SIZE + GEMM_ALIGN) & ~GEMM_ALIGN)) + GEMM_OFFSET_B);
+diff --git a/interface/trmv.c b/interface/trmv.c
+index 029a83499..3363854ca 100644
+--- a/interface/trmv.c
++++ b/interface/trmv.c
+@@ -215,7 +215,9 @@ void CNAME(enum CBLAS_ORDER order, enum CBLAS_UPLO Uplo,
+ 
+   if (incx < 0 ) x -= (n - 1) * incx;
+ 
+-  buffer = (FLOAT *)blas_memory_alloc(1);
++  buffer = (FLOAT *)blas_memory_alloc_try(1);
++  /* No work buffer: the thread's failure flag is set. */
++  if (buffer == NULL) return;
+ 
+ #ifdef SMP
+   nthreads = num_cpu_avail(2);
+diff --git a/interface/trsm.c b/interface/trsm.c
+index 988b59f6f..805fdc9f0 100644
+--- a/interface/trsm.c
++++ b/interface/trsm.c
+@@ -394,7 +394,9 @@ if (strcmp(gotoblas_corename(), "armv9sme") == 0
+ 
+   FUNCTION_PROFILE_START();
+ 
+-  buffer = (FLOAT *)blas_memory_alloc(0);
++  buffer = (FLOAT *)blas_memory_alloc_try(0);
++  /* No work buffer: the thread's failure flag is set. */
++  if (buffer == NULL) return;
+ 
+   sa = (FLOAT *)((BLASLONG)buffer + GEMM_OFFSET_A);
+   sb = (FLOAT *)(((BLASLONG)sa + ((GEMM_P * GEMM_Q * COMPSIZE * SIZE + GEMM_ALIGN) & ~GEMM_ALIGN)) + GEMM_OFFSET_B);
+diff --git a/kernel/x86_64/dgemm_small_kernel_nn_skylakex.c b/kernel/x86_64/dgemm_small_kernel_nn_skylakex.c
+index da57a18a7..286cfda1e 100644
+--- a/kernel/x86_64/dgemm_small_kernel_nn_skylakex.c
++++ b/kernel/x86_64/dgemm_small_kernel_nn_skylakex.c
+@@ -34,6 +34,8 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ #include <stdio.h>
+ #include <memory.h>
+ 
++extern void openblas_warning(int verbose, const char *msg);
++
+ #define DECLARE_RESULT_512(M, N) __m512d result##M##N = _mm512_setzero_pd()
+ #define LOAD_A_512(M, N) __m512d Aval##M = _mm512_loadu_pd(&A[lda * k + i + (M*8)])
+ #define MASK_LOAD_A_512(M, N) __m512d Aval##M = _mm512_maskz_loadu_pd(mask, &A[lda * k + i + (M*8)])
+@@ -333,6 +335,13 @@ int CNAME(BLASLONG M, BLASLONG N, BLASLONG K, FLOAT * A, BLASLONG lda, FLOAT alp
+ 		 * Note: performance is bad when K is small.
+ 		 */
+ 		FLOAT *mbuf = (FLOAT *) malloc(sizeof(FLOAT)*mm*K);
++		/* The rows above the tail are already in C, so the product is left
++		 * incomplete; the thread's failure flag says so. */
++		if (mbuf == NULL) {
++			openblas_warning(0, "gemm: cannot allocate the scratch of the small-matrix kernel, the result is incomplete\n");
++			blas_memory_note_failure();
++			return 1;
++		}
+ 		__mmask8 mask = (1UL << mm) - 1;
+ 		BLASLONG k8 = K & ~7;
+ 		BLASLONG k4 = K & ~3;
+diff --git a/kernel/x86_64/sbgemm_kernel_16x16_spr_tmpl.c b/kernel/x86_64/sbgemm_kernel_16x16_spr_tmpl.c
+index 5ee3c8532..34de8db76 100644
+--- a/kernel/x86_64/sbgemm_kernel_16x16_spr_tmpl.c
++++ b/kernel/x86_64/sbgemm_kernel_16x16_spr_tmpl.c
+@@ -29,6 +29,8 @@
+ #include <string.h>
+ #include "common.h"
+ 
++extern void openblas_warning(int verbose, const char *msg);
++
+ #ifndef SBGEMM_KERNEL_SPR
+ #define SBGEMM_KERNEL_SPR
+ typedef struct {
+@@ -178,6 +180,13 @@ int sbgemm_kernel_spr_alpha(BLASLONG m, BLASLONG n, BLASLONG k, FLOAT alpha, IFL
+ 	} else {
+ 		raw_tmp_c = (FLOAT *)malloc(sizeof(FLOAT) * m * cn + 64);
+ 	}
++	/* C already holds beta * C from the driver, so the product is left
++	 * incomplete; the thread's failure flag says so. */
++	if (raw_tmp_c == NULL) {
++		openblas_warning(0, "sbgemm: cannot allocate the temporary of the AMX kernel, the result is incomplete\n");
++		blas_memory_note_failure();
++		return 1;
++	}
+ 	// align buf to 64 byte boundary
+ 	FLOAT *tmp_c = (FLOAT *)(((uintptr_t) raw_tmp_c + 63) & ~(uintptr_t)63);
+ 	ptr_c = tmp_c;
+diff --git a/kernel/x86_64/sbgemm_small_kernel_template_cooperlake.c b/kernel/x86_64/sbgemm_small_kernel_template_cooperlake.c
+index 1ab7a34ab..5b7497a6a 100644
+--- a/kernel/x86_64/sbgemm_small_kernel_template_cooperlake.c
++++ b/kernel/x86_64/sbgemm_small_kernel_template_cooperlake.c
+@@ -63,6 +63,8 @@ extern void sbgemm_blocking_kernel_tt_one(blasint M, blasint N, blasint K, float
+ 	raw_ptr = malloc((size) + 63); \
+ 	ptr = (bfloat16 *)(((uintptr_t) raw_ptr + 63) & ~(uintptr_t)63)
+ 
++extern void openblas_warning(int verbose, const char *msg);
++
+ 
+ #if defined(B0)
+ int CNAME(BLASLONG M, BLASLONG N, BLASLONG K, IFLOAT * A, BLASLONG lda, FLOAT alpha, IFLOAT * B, BLASLONG ldb, FLOAT * C, BLASLONG ldc)
+@@ -78,6 +80,16 @@ int CNAME(BLASLONG M, BLASLONG N, BLASLONG K, IFLOAT * A, BLASLONG lda, FLOAT al
+ 	MALLOC_ALIGN64(block_A, sizeof(bfloat16) * BF16_BLOCK_THRES_K * BF16_BLOCK_THRES_M, raw_ptrA);
+ 	MALLOC_ALIGN64(block_B, sizeof(bfloat16) * BF16_BLOCK_THRES_N * BF16_BLOCK_THRES_K, raw_ptrB);
+ 
++	/* The thread's failure flag says so, and the non-zero return lets
++	 * interface/gemm.c answer NO_MEMORY. */
++	if (raw_ptrA == NULL || raw_ptrB == NULL) {
++		free(raw_ptrA);
++		free(raw_ptrB);
++		openblas_warning(0, "sbgemm: cannot allocate the blocks of the small-matrix kernel, the call is skipped\n");
++		blas_memory_note_failure();
++		return 1;
++	}
++
+ #if defined(B0)
+ 	sbgemm_zero_operation(M, N, C, ldc);
+ #else
+diff --git a/kernel/x86_64/sbgemv_n.c b/kernel/x86_64/sbgemv_n.c
+index 08ccace61..4a935a301 100644
+--- a/kernel/x86_64/sbgemv_n.c
++++ b/kernel/x86_64/sbgemv_n.c
+@@ -28,57 +28,59 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "common.h"
+ 
++extern void openblas_warning(int verbose, const char *msg);
++
+ #if defined (COOPERLAKE) || defined (SAPPHIRERAPIDS)
+ #include "sbgemv_n_microk_cooperlake.c"
+ #endif
+ 
+ #define ALIGN64_ALLOC(alloc_size, TYPE, ptr_align, ptr)   \
+     ptr = (TYPE *) malloc(sizeof(TYPE)*alloc_size + 63); \
+-    ptr_align = ((int)(((uintptr_t)ptr & (uintptr_t)0x3F))!=0) ? (TYPE *)((char *)ptr + (64 - (int)((uintptr_t)ptr & (uintptr_t)0x3F))) : ptr
++    ptr_align = (ptr == NULL) ? NULL : ((int)(((uintptr_t)ptr & (uintptr_t)0x3F))!=0) ? (TYPE *)((char *)ptr + (64 - (int)((uintptr_t)ptr & (uintptr_t)0x3F))) : ptr
+ 
+ #define ALIGN64_FREE(ptr) \
+     free(ptr)
+ 
+ #ifndef HAVE_SBGEMV_N_ACCL_KERNEL
+-static void sbgemv_kernel_n(BLASLONG m, BLASLONG n, float alpha, bfloat16 *a, BLASLONG lda, bfloat16 *x, float beta, float *y)
++/*
++ * Scalar fallback for cores without a bfloat16 GEMV kernel. It reads the
++ * operands in place, widening each element as SBF16TOS_K does (a denormal
++ * becomes a zero of the same sign, a NaN gets its quiet bit), so it needs no
++ * copy of the matrix and cannot fail for want of memory. The products are
++ * summed in the same order as before, one row at a time over j.
++ */
++static inline float sbgemv_widen(bfloat16 v)
+ {
+-	BLASLONG offset_lda, offset_m;
+-    float accum = 0.0;
+-    float tmp_x = 0.0;
+-
+-    bfloat16 * a_bf16 = malloc(sizeof(bfloat16)*m*n);
+-    float *    a_fp32 = malloc(sizeof(float)*m*n);
+-    float *    x_fp32 = malloc(sizeof(float)*n);
+-
+-    for (BLASLONG j=0; j<n; j++) {
+-        offset_lda = lda * j;
+-        offset_m = m * j;
+-        for (BLASLONG i=0; i<m; i++) {
+-            a_bf16[offset_m + i] = a[offset_lda + i];
+-        }
+-    }
+-
+-    SBF16TOS_K(n, x, 1, x_fp32, 1);
+-    SBF16TOS_K(m*n, a_bf16, 1, a_fp32, 1);
++    uint32_t bits = (uint32_t)v;
++    uint32_t exponent = bits & 0x7f80u;
++    uint32_t denormal = (uint32_t)0 - (uint32_t)(exponent == 0);
++    uint32_t nan = (uint32_t)0 - (uint32_t)(exponent == 0x7f80u && (bits & 0x007fu) != 0);
++    float out;
++
++    bits = (bits & (0x8000u | ~denormal)) | (nan & 0x0040u);
++    bits <<= 16;
++    memcpy(&out, &bits, sizeof(out));
++    return out;
++}
+ 
++static void sbgemv_kernel_n_strided(BLASLONG m, BLASLONG n, float alpha, bfloat16 *a, BLASLONG lda,
++                                    bfloat16 *x, BLASLONG incx, float beta, float *y, BLASLONG incy)
++{
+     for (BLASLONG i=0; i<m; i++) {
+-        accum = 0.0;
+-		for (BLASLONG j=0; j<n; j++) {
+-		    accum += a_fp32[j*m + i] * x_fp32[j];
+-		}
++        float accum = 0.0;
++        for (BLASLONG j=0; j<n; j++) {
++            accum += sbgemv_widen(a[j*lda + i]) * sbgemv_widen(x[j*incx]);
++        }
+         if (beta == ZERO) {
+-		    y[i] = alpha * accum;
++            y[i*incy] = alpha * accum;
+         } else {
+-            y[i] = alpha * accum + beta * y[i];
++            y[i*incy] = alpha * accum + beta * y[i*incy];
+         }
+-	}
+-
+-    free(a_bf16);
+-    free(a_fp32);
+-    free(x_fp32);
++    }
+ }
+ #endif
+ 
++#ifdef HAVE_SBGEMV_N_ACCL_KERNEL
+ static void bf16_compress_vector(BLASLONG n, bfloat16 * src, bfloat16 * target, BLASLONG inc)
+ {
+     for(BLASLONG i=0; i<n; i++) {
+@@ -99,24 +101,45 @@ static void fp32_expand_vector(BLASLONG n, float * src, float * target, BLASLONG
+         target[i*inc] = src[i];
+     }
+ }
++#endif
+ 
+ int CNAME(BLASLONG m, BLASLONG n, float alpha, bfloat16 *a, BLASLONG lda, bfloat16 *x, BLASLONG incx, float beta, float * y, BLASLONG incy)
+ {
+     if ( m < 1 || n < 1) return(0);
+ 
++#ifndef HAVE_SBGEMV_N_ACCL_KERNEL
++    sbgemv_kernel_n_strided(m, n, alpha, a, lda, x, incx, beta, y, incy);
++    return(0);
++#else
+     bfloat16 * xbuffer_align = x;
+     float    * ybuffer_align = y;
+ 
+     bfloat16 * xbuffer = NULL;
+     float    * ybuffer = NULL;
+ 
++    /* The accelerated kernel reads contiguous vectors. A strided x or y is
++     * compacted into a temporary; when that cannot be allocated, y is left
++     * untouched and the thread's failure flag is set (openblas_alloc_failed). */
+     if (incx != 1) {
+         ALIGN64_ALLOC(n, bfloat16, xbuffer_align, xbuffer);
++        if (xbuffer == NULL) {
++            openblas_warning(0, "sbgemv: cannot allocate a vector copy, the call is skipped\n");
++            blas_memory_note_failure();
++            return(1);
++        }
+         bf16_compress_vector(n, x, xbuffer_align, incx);
+     }
+ 
+     if (incy != 1) {
+         ALIGN64_ALLOC(m, float, ybuffer_align, ybuffer);
++        if (ybuffer == NULL) {
++            if (incx != 1) {
++                ALIGN64_FREE(xbuffer);
++            }
++            openblas_warning(0, "sbgemv: cannot allocate a vector copy, the call is skipped\n");
++            blas_memory_note_failure();
++            return(1);
++        }
+         if (beta != ZERO) {
+             fp32_compress_vector(m, y, ybuffer_align, incy);
+         }
+@@ -133,5 +156,6 @@ int CNAME(BLASLONG m, BLASLONG n, float alpha, bfloat16 *a, BLASLONG lda, bfloat
+         ALIGN64_FREE(xbuffer);
+     }
+ 
+-	return(0);
++    return(0);
++#endif
+ }
+diff --git a/kernel/x86_64/sbgemv_t.c b/kernel/x86_64/sbgemv_t.c
+index 51ea0d937..399bce919 100644
+--- a/kernel/x86_64/sbgemv_t.c
++++ b/kernel/x86_64/sbgemv_t.c
+@@ -28,57 +28,61 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "common.h"
+ 
++extern void openblas_warning(int verbose, const char *msg);
++
+ #if defined (COOPERLAKE) || defined (SAPPHIRERAPIDS)
+ #include "sbgemv_t_microk_cooperlake.c"
+ #endif
+ 
+ #define ALIGN64_ALLOC(alloc_size, TYPE, ptr_align, ptr)   \
+     ptr = (TYPE *) malloc(sizeof(TYPE)*alloc_size + 63); \
+-    ptr_align = ((int)(((uintptr_t)ptr & (uintptr_t)0x3F))!=0) ? (TYPE *)((char *)ptr + (64 - (int)((uintptr_t)ptr & (uintptr_t)0x3F))) : ptr
++    ptr_align = (ptr == NULL) ? NULL : ((int)(((uintptr_t)ptr & (uintptr_t)0x3F))!=0) ? (TYPE *)((char *)ptr + (64 - (int)((uintptr_t)ptr & (uintptr_t)0x3F))) : ptr
+ 
+ #define ALIGN64_FREE(ptr) \
+     free(ptr)
+ 
+ #ifndef HAVE_SBGEMV_T_ACCL_KERNEL
+-static void sbgemv_kernel_t(BLASLONG m, BLASLONG n, float alpha, bfloat16 *a, BLASLONG lda, bfloat16 *x, float beta, float *y)
++/*
++ * Scalar fallback for cores without a bfloat16 GEMV kernel. It reads the
++ * operands in place, widening each element as SBF16TOS_K does (a denormal
++ * becomes a zero of the same sign, a NaN gets its quiet bit), so it needs no
++ * copy of the matrix and cannot fail for want of memory. The products are
++ * summed in the same order as before, one row of the transposed matrix at a
++ * time over j. m and n are the swapped extents, as in CNAME below.
++ */
++static inline float sbgemv_widen(bfloat16 v)
+ {
+-	BLASLONG offset_lda, offset_n;
+-    float accum = 0.0;
+-
+-    bfloat16 * a_bf16 = malloc(sizeof(bfloat16)*m*n);
+-    float *    a_fp32 = malloc(sizeof(float)*m*n);
+-    float *    x_fp32 = malloc(sizeof(float)*n);
++    uint32_t bits = (uint32_t)v;
++    uint32_t exponent = bits & 0x7f80u;
++    uint32_t denormal = (uint32_t)0 - (uint32_t)(exponent == 0);
++    uint32_t nan = (uint32_t)0 - (uint32_t)(exponent == 0x7f80u && (bits & 0x007fu) != 0);
++    float out;
++
++    bits = (bits & (0x8000u | ~denormal)) | (nan & 0x0040u);
++    bits <<= 16;
++    memcpy(&out, &bits, sizeof(out));
++    return out;
++}
+ 
+-    for (BLASLONG i=0; i<m; i++)  {
+-        offset_lda = lda * i;
+-        offset_n = n * i;
++static void sbgemv_kernel_t_strided(BLASLONG m, BLASLONG n, float alpha, bfloat16 *a, BLASLONG lda,
++                                    bfloat16 *x, BLASLONG incx, float beta, float *y, BLASLONG incy)
++{
++    for (BLASLONG i=0; i<m; i++) {
++        BLASLONG offset_lda = lda * i;
++        float accum = 0.0;
+         for (BLASLONG j=0; j<n; j++) {
+-            a_bf16[offset_n + j] = a[offset_lda + j];
++            accum += sbgemv_widen(a[offset_lda + j]) * sbgemv_widen(x[j*incx]);
+         }
+-    }
+-
+-    SBF16TOS_K(n, x, 1, x_fp32, 1);
+-    SBF16TOS_K(m*n, a_bf16, 1, a_fp32, 1);
+-
+-	for (BLASLONG i=0; i<m; i++) {
+-		offset_n = n * i;
+-        accum = 0.0;
+-		for (BLASLONG j=0; j<n; j++) {
+-		    accum += a_fp32[offset_n + j] * x_fp32[j];
+-		}
+         if (beta == ZERO) {
+-		    y[i] = alpha * accum;
++            y[i*incy] = alpha * accum;
+         } else {
+-            y[i] = alpha * accum + beta * y[i];
++            y[i*incy] = alpha * accum + beta * y[i*incy];
+         }
+-	}
+-
+-    free(a_bf16);
+-    free(a_fp32);
+-    free(x_fp32);
++    }
+ }
+ #endif
+ 
++#ifdef HAVE_SBGEMV_T_ACCL_KERNEL
+ static void bf16_compress_vector(BLASLONG n, bfloat16 * src, bfloat16 * target, BLASLONG inc)
+ {
+     for(BLASLONG i=0; i<n; i++) {
+@@ -99,29 +103,50 @@ static void fp32_expand_vector(BLASLONG n, float * src, float * target, BLASLONG
+         target[i*inc] = src[i];
+     }
+ }
++#endif
+ 
+ int CNAME(BLASLONG m, BLASLONG n, float alpha, bfloat16 *a, BLASLONG lda, bfloat16 *x, BLASLONG incx, float beta, float * y, BLASLONG incy)
+ {
+     if ( m < 1 || n < 1) return(0);
+ 
++    // Switch m and n
++    BLASLONG t = m;
++    m = n;
++    n = t;
++
++#ifndef HAVE_SBGEMV_T_ACCL_KERNEL
++    sbgemv_kernel_t_strided(m, n, alpha, a, lda, x, incx, beta, y, incy);
++    return(0);
++#else
+     bfloat16 * xbuffer_align = x;
+     float    * ybuffer_align = y;
+ 
+     bfloat16 * xbuffer = NULL;
+     float    * ybuffer = NULL;
+ 
+-    // Switch m and n
+-    BLASLONG t = m;
+-    m = n;
+-    n = t;
+-
++    /* The accelerated kernel reads contiguous vectors. A strided x or y is
++     * compacted into a temporary; when that cannot be allocated, y is left
++     * untouched and the thread's failure flag is set (openblas_alloc_failed). */
+     if (incx != 1) {
+         ALIGN64_ALLOC(n, bfloat16, xbuffer_align, xbuffer);
++        if (xbuffer == NULL) {
++            openblas_warning(0, "sbgemv: cannot allocate a vector copy, the call is skipped\n");
++            blas_memory_note_failure();
++            return(1);
++        }
+         bf16_compress_vector(n, x, xbuffer_align, incx);
+     }
+ 
+     if (incy != 1) {
+         ALIGN64_ALLOC(m, float, ybuffer_align, ybuffer);
++        if (ybuffer == NULL) {
++            if (incx != 1) {
++                ALIGN64_FREE(xbuffer);
++            }
++            openblas_warning(0, "sbgemv: cannot allocate a vector copy, the call is skipped\n");
++            blas_memory_note_failure();
++            return(1);
++        }
+         if (beta != ZERO) {
+             fp32_compress_vector(m, y, ybuffer_align, incy);
+         }
+@@ -138,5 +163,6 @@ int CNAME(BLASLONG m, BLASLONG n, float alpha, bfloat16 *a, BLASLONG lda, bfloat
+         ALIGN64_FREE(xbuffer);
+     }
+ 
+-	return(0);
++    return(0);
++#endif
+ }
+diff --git a/kernel/x86_64/sgemm_small_kernel_nn_skylakex.c b/kernel/x86_64/sgemm_small_kernel_nn_skylakex.c
+index 6f4309c30..5488249da 100644
+--- a/kernel/x86_64/sgemm_small_kernel_nn_skylakex.c
++++ b/kernel/x86_64/sgemm_small_kernel_nn_skylakex.c
+@@ -35,6 +35,8 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ #include <stdio.h>
+ #include <memory.h>
+ 
++extern void openblas_warning(int verbose, const char *msg);
++
+ #define DECLARE_RESULT_512(M, N) __m512 result##M##N = _mm512_setzero_ps()
+ #define LOAD_A_512(M, N) __m512 Aval##M = _mm512_loadu_ps(&A[lda * k + i + (M*16)])
+ #define MASK_LOAD_A_512(M, N) __m512 Aval##M = _mm512_maskz_loadu_ps(mask, &A[lda * k + i + (M*16)])
+@@ -335,6 +337,13 @@ int CNAME(BLASLONG M, BLASLONG N, BLASLONG K, FLOAT * A, BLASLONG lda, FLOAT alp
+ 		 * Note: performance is bad when K is small.
+ 		 */
+ 		FLOAT *mbuf = (FLOAT *) malloc(sizeof(FLOAT)*mm*K);
++		/* The rows above the tail are already in C, so the product is left
++		 * incomplete; the thread's failure flag says so. */
++		if (mbuf == NULL) {
++			openblas_warning(0, "gemm: cannot allocate the scratch of the small-matrix kernel, the result is incomplete\n");
++			blas_memory_note_failure();
++			return 1;
++		}
+ 		__mmask8 mask8 = (1UL << mm) - 1;
+ 		__mmask16 mask;
+ 		BLASLONG k16 = K & ~15;
+diff --git a/utest/CMakeLists.txt b/utest/CMakeLists.txt
+index adf42423b..339117cd3 100644
+--- a/utest/CMakeLists.txt
++++ b/utest/CMakeLists.txt
+@@ -86,6 +86,7 @@ ${DIR_EXT}/test_zgemm.c
+ ${DIR_EXT}/test_cgemm.c
+ ${DIR_EXT}/test_sgemm_pack.c
+ ${DIR_EXT}/test_dgemm_pack.c
++${DIR_EXT}/test_alloc_failed.c
+ )
+ if (BUILD_BFLOAT16)
+ set(OpenBLAS_utest_ext_src
+diff --git a/utest/Makefile b/utest/Makefile
+index 5c1a2b98c..baff5501c 100644
+--- a/utest/Makefile
++++ b/utest/Makefile
+@@ -30,7 +30,7 @@ OBJS_EXT+=$(DIR_EXT)/test_cgemv_t.o $(DIR_EXT)/test_zgemv_t.o $(DIR_EXT)/test_cg
+ OBJS_EXT+=$(DIR_EXT)/test_sgemmt.o $(DIR_EXT)/test_dgemmt.o $(DIR_EXT)/test_cgemmt.o $(DIR_EXT)/test_zgemmt.o
+ OBJS_EXT+=$(DIR_EXT)/test_ztrmv.o $(DIR_EXT)/test_ctrmv.o $(DIR_EXT)/test_ztrsv.o $(DIR_EXT)/test_ctrsv.o
+ OBJS_EXT+=$(DIR_EXT)/test_zgemm.o $(DIR_EXT)/test_cgemm.o $(DIR_EXT)/test_zgbmv.o $(DIR_EXT)/test_cgbmv.o
+-OBJS_EXT+=$(DIR_EXT)/test_sgemm_pack.o $(DIR_EXT)/test_dgemm_pack.o
++OBJS_EXT+=$(DIR_EXT)/test_sgemm_pack.o $(DIR_EXT)/test_dgemm_pack.o $(DIR_EXT)/test_alloc_failed.o
+ ifeq ($(BUILD_BFLOAT16),1)
+ OBJS_EXT+=$(DIR_EXT)/test_sbgemm_pack.o
+ endif
+diff --git a/utest/test_extensions/test_alloc_failed.c b/utest/test_extensions/test_alloc_failed.c
+new file mode 100644
+index 000000000..ac60f4a9d
+--- /dev/null
++++ b/utest/test_extensions/test_alloc_failed.c
+@@ -0,0 +1,74 @@
++/*****************************************************************************
++Copyright (c) 2026, The OpenBLAS Project
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are
++met:
++
++   1. Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++
++   2. Redistributions in binary form must reproduce the above copyright
++      notice, this list of conditions and the following disclaimer in
++      the documentation and/or other materials provided with the
++      distribution.
++   3. Neither the name of the OpenBLAS project nor the names of
++      its contributors may be used to endorse or promote products
++      derived from this software without specific prior written
++      permission.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
++OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
++USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++**********************************************************************************/
++
++#include "utest/openblas_utest.h"
++#include "common.h"
++
++#ifndef NO_CBLAS
++
++/* The per-thread allocation failure flag: clear at the start, still clear
++ * after calls that obtained their buffers, and set by the internal note. A
++ * real failure needs the process to be short of memory, which a unit test
++ * cannot arrange portably; the failure-injection harness described in the
++ * fork's design note (change/openblas-alloc-failure.md) does that with a job
++ * object on Windows. */
++CTEST(alloc_failed, flag_reflects_calls)
++{
++#ifdef BUILD_SINGLE
++    float a[4] = {1.0f, 2.0f, 3.0f, 4.0f};
++    float b[4] = {1.0f, 0.0f, 0.0f, 1.0f};
++    float c[4] = {7.0f, 7.0f, 7.0f, 7.0f};
++    float x[2] = {1.0f, 1.0f};
++    float y[2] = {0.0f, 0.0f};
++    int i;
++
++    openblas_clear_alloc_failed();
++    ASSERT_EQUAL(0, openblas_alloc_failed());
++
++    cblas_sgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, 1.0f, a, 2, b, 2, 0.0f, c, 2);
++    ASSERT_EQUAL(0, openblas_alloc_failed());
++    for (i = 0; i < 4; i++) ASSERT_DBL_NEAR_TOL(a[i], c[i], SINGLE_EPS);
++
++    cblas_sgemv(CblasColMajor, CblasNoTrans, 2, 2, 1.0f, a, 2, x, 1, 0.0f, y, 1);
++    ASSERT_EQUAL(0, openblas_alloc_failed());
++    ASSERT_DBL_NEAR_TOL(4.0f, y[0], SINGLE_EPS);
++    ASSERT_DBL_NEAR_TOL(6.0f, y[1], SINGLE_EPS);
++
++    blas_memory_note_failure();
++    ASSERT_EQUAL(1, openblas_alloc_failed());
++    openblas_clear_alloc_failed();
++    ASSERT_EQUAL(0, openblas_alloc_failed());
++#endif
++}
++
++#endif /* NO_CBLAS */

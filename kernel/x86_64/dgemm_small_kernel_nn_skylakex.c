@@ -34,6 +34,8 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <memory.h>
 
+extern void openblas_warning(int verbose, const char *msg);
+
 #define DECLARE_RESULT_512(M, N) __m512d result##M##N = _mm512_setzero_pd()
 #define LOAD_A_512(M, N) __m512d Aval##M = _mm512_loadu_pd(&A[lda * k + i + (M*8)])
 #define MASK_LOAD_A_512(M, N) __m512d Aval##M = _mm512_maskz_loadu_pd(mask, &A[lda * k + i + (M*8)])
@@ -333,6 +335,13 @@ int CNAME(BLASLONG M, BLASLONG N, BLASLONG K, FLOAT * A, BLASLONG lda, FLOAT alp
 		 * Note: performance is bad when K is small.
 		 */
 		FLOAT *mbuf = (FLOAT *) malloc(sizeof(FLOAT)*mm*K);
+		/* The rows above the tail are already in C, so the product is left
+		 * incomplete; the thread's failure flag says so. */
+		if (mbuf == NULL) {
+			openblas_warning(0, "gemm: cannot allocate the scratch of the small-matrix kernel, the result is incomplete\n");
+			blas_memory_note_failure();
+			return 1;
+		}
 		__mmask8 mask = (1UL << mm) - 1;
 		BLASLONG k8 = K & ~7;
 		BLASLONG k4 = K & ~3;
