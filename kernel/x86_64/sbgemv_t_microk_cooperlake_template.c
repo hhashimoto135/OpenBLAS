@@ -3056,7 +3056,19 @@ static int sbgemv_kernel_8x16m_lda(BLASLONG m, BLASLONG n, float alpha, bfloat16
                 accum128 = _mm_add_ps(accum128, tmp128);
                 tmp128 = _mm_shuffle_ps(accum128, accum128, 0x01);
                 accum128 = _mm_add_ps(accum128, tmp128);
-                y[i] += accum128[0] * alpha;
+#ifndef ZERO_BETA
+#ifndef ONE_BETA
+                y[i] = alpha * accum128[0] + beta * y[i];
+#else
+                y[i] = alpha * accum128[0] + y[i];
+#endif
+#else
+#ifndef ONE_ALPHA
+                y[i] = accum128[0] * alpha;
+#else
+                y[i] = accum128[0];
+#endif
+#endif
             }
         }
     } else {
